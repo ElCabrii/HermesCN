@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from './client'
 import {
+  archiveSession,
   branchSession,
   clearSession,
   deleteSession,
@@ -12,6 +13,7 @@ import {
   getSessionUsage,
   listSessions,
   newSession,
+  pinSession,
   renameSession,
   retryLast,
   searchSessions,
@@ -431,6 +433,50 @@ describe('setSessionToolsets()', () => {
     await expect(setSessionToolsets('abc123', null)).resolves.toEqual({ ok: true, enabled_toolsets: null })
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toEqual({ session_id: 'abc123', toolsets: null })
+  })
+})
+
+describe('pinSession()', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('POSTs { session_id, pinned } to /api/session/pin and parses { session }', async () => {
+    const fetchMock = fetchMockResolving({ ok: true, session: { ...SESSION, pinned: true } })
+    await expect(pinSession('abc123', true)).resolves.toEqual({ ok: true, session: { ...SESSION, pinned: true } })
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/session/pin')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ session_id: 'abc123', pinned: true })
+  })
+
+  it('sends pinned: false to unpin', async () => {
+    const fetchMock = fetchMockResolving({ ok: true, session: { ...SESSION, pinned: false } })
+    await pinSession('abc123', false)
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ session_id: 'abc123', pinned: false })
+  })
+})
+
+describe('archiveSession()', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('POSTs { session_id, archived } to /api/session/archive and parses { session }', async () => {
+    const fetchMock = fetchMockResolving({ ok: true, session: { ...SESSION, archived: true } })
+    await expect(archiveSession('abc123', true)).resolves.toEqual({ ok: true, session: { ...SESSION, archived: true } })
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/session/archive')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(String(init.body))).toEqual({ session_id: 'abc123', archived: true })
+  })
+
+  it('sends archived: false to unarchive', async () => {
+    const fetchMock = fetchMockResolving({ ok: true, session: { ...SESSION, archived: false } })
+    await archiveSession('abc123', false)
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(String(init.body))).toEqual({ session_id: 'abc123', archived: false })
   })
 })
 

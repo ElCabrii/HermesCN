@@ -411,6 +411,36 @@ export function duplicateSession(sessionId: string): Promise<SessionDetailRespon
   })
 }
 
+/** Response of POST /api/session/pin (the compact session carries the new flag). */
+export interface PinSessionResult extends JsonObject {
+  ok: true
+  session: SessionDetail
+}
+
+/** Pin or unpin a session (POST /api/session/pin, verified in routes.py). */
+export function pinSession(sessionId: string, pinned: boolean): Promise<PinSessionResult> {
+  return api<PinSessionResult>('/api/session/pin', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify({ session_id: sessionId, pinned }),
+  })
+}
+
+/** Response of POST /api/session/archive (the compact session carries the new flag). */
+export interface ArchiveSessionResult extends JsonObject {
+  ok: true
+  session: SessionDetail
+}
+
+/** Archive or unarchive a session (POST /api/session/archive, verified in routes.py). */
+export function archiveSession(sessionId: string, archived: boolean): Promise<ArchiveSessionResult> {
+  return api<ArchiveSessionResult>('/api/session/archive', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify({ session_id: sessionId, archived }),
+  })
+}
+
 /** Response of POST /api/session/clear (full truncate-to-empty). */
 export interface ClearSessionResult {
   ok: true
