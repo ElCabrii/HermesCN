@@ -124,7 +124,7 @@ export async function loadSession(sid: string): Promise<Session | null> {
  *   active session is still `activeSid`. A stale completion never unlocks
  *   busy on the session the user switched to.
  */
-export async function sendMessage(text: string, files: File[] = []): Promise<void> {
+export async function sendMessage(text: string, files: File[] = [], model?: string): Promise<void> {
   const message = text.trim()
   const pending = files.length > 0 ? files : chatStore.get(pendingFilesAtom)
   if (!message && pending.length === 0) return
@@ -186,6 +186,7 @@ export async function sendMessage(text: string, files: File[] = []): Promise<voi
       session_id: activeSid,
       message,
       ...(attachments.length > 0 ? { attachments } : {}),
+      ...(model ? { model, explicit_model_pick: true } : {}),
     })
   } catch (e) {
     if (chatStore.get(sessionAtom)?.session_id === activeSid) {
@@ -249,6 +250,10 @@ export async function cancelStream(): Promise<void> {
  * Apply one SSE frame to the active session's transcript. Events are ignored
  * when no stream is active on the current pane (stale stream frames must never
  * mutate or unlock the session the user is looking at).
+ *
+ * Every applied event is also fanned out to `onChatEvent` subscribers so
+ * surface components (approval card, clarify dialog) can react without owning
+ * the EventSource.
  */
 export function applyStreamEvent(event: ChatStreamEvent): void {
   const sid = chatStore.get(sessionAtom)?.session_id
@@ -281,8 +286,36 @@ export function applyStreamEvent(event: ChatStreamEvent): void {
       break
     default:
       // tool / reasoning / approval / clarify / metering / compressing /
-      // warning / apperror are surfaced by the streaming integration (Task 3.5).
+      // warning / apperror are surfaced to subscribers below (Task 3.5 owns
+      // the streaming integration that drives these frames).
       break
+  }
+
+  // Fan out to subscribers (Composer approval card / clarify dialog). A
+  // listener must never break stream state application.
+  for (const listener of chatEventListeners) {
+    try {
+      listener(event)
+    } catch {
+      // ignore listener errors
+    }
+  }
+}
+
+/** Listener for events applied by `applyStreamEvent`. */
+export type ChatEventListener = (event: ChatStreamEvent) => void
+
+const chatEventListeners = new Set<ChatEventListener>()
+
+/**
+ * Subscribe to stream events applied to the active session. Returns an
+ * unsubscribe function. The Composer uses this to surface the approval card
+ * and clarify dialog without owning the EventSource.
+ */
+export function onChatEvent(listener: ChatEventListener): () => void {
+  chatEventListeners.add(listener)
+  return () => {
+    chatEventListeners.delete(listener)
   }
 }
 

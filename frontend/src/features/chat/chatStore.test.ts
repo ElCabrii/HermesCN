@@ -13,6 +13,7 @@ import {
   loadSession,
   messagesAtom,
   newSession,
+  onChatEvent,
   pendingFilesAtom,
   sessionAtom,
   sendMessage,
@@ -363,5 +364,61 @@ describe('cancelStream', () => {
     expect(chatStore.get(busyAtom)).toBe(true)
     expect(chatStore.get(streamIdAtom)).toBe('stream-b')
     expect(chatStore.get(sessionAtom)?.session_id).toBe('b')
+  })
+})
+
+describe('sendMessage with an explicit model', () => {
+  it('threads a chosen model id into chat/start with explicit_model_pick', async () => {
+    serverSessions.set('a', makeSession('a'))
+    await loadSession('a')
+
+    await sendMessage('hi', [], 'gpt-4o')
+
+    expect(startChat).toHaveBeenCalledWith(
+      expect.objectContaining({ session_id: 'a', message: 'hi', model: 'gpt-4o', explicit_model_pick: true }),
+    )
+  })
+
+  it('omits the model fields when none was chosen', async () => {
+    serverSessions.set('a', makeSession('a'))
+    await loadSession('a')
+
+    await sendMessage('hi')
+
+    const request = vi.mocked(startChat).mock.calls[0][0]
+    expect(request.model).toBeUndefined()
+    expect(request.explicit_model_pick).toBeUndefined()
+  })
+})
+
+describe('onChatEvent', () => {
+  it('notifies subscribers of every event applied to the active stream', async () => {
+    serverSessions.set('a', makeSession('a'))
+    await loadSession('a')
+    chatStore.set(streamIdAtom, 'stream-1')
+
+    const seen: string[] = []
+    const unsubscribe = onChatEvent((event) => seen.push(event.type))
+
+    applyStreamEvent({ type: 'approval', data: { command: 'rm -rf /tmp/x' } })
+    applyStreamEvent({ type: 'clarify', data: { question: 'which?' } })
+    applyStreamEvent({ type: 'done', session: null, usage: null })
+
+    expect(seen).toEqual(['approval', 'clarify', 'done'])
+    unsubscribe()
+    applyStreamEvent({ type: 'approval', data: { command: 'ignored' } })
+    expect(seen).toEqual(['approval', 'clarify', 'done'])
+  })
+
+  it('does not notify when no stream is active on the current session', async () => {
+    serverSessions.set('a', makeSession('a'))
+    await loadSession('a')
+    const listener = vi.fn()
+    const unsubscribe = onChatEvent(listener)
+
+    applyStreamEvent({ type: 'approval', data: { command: 'ignored' } })
+
+    expect(listener).not.toHaveBeenCalled()
+    unsubscribe()
   })
 })
