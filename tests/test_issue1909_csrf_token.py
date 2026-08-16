@@ -153,13 +153,20 @@ def test_login_route_remains_csrf_exempt(monkeypatch):
 
 
 def test_index_shell_includes_csrf_fetch_and_sendbeacon_injection():
+    # The CSRF token placeholder must be present in whichever shell is active
+    # (legacy static/index.html or the built frontend/dist/index.html — Task
+    # 8.4), since the server substitutes it per request.
     src = api_config.get_index_html_path().read_text(encoding="utf-8")
-
     assert "csrfToken:__CSRF_TOKEN_JSON__" in src
-    assert "X-Hermes-CSRF-Token" in src
-    assert "window.fetch=function" in src
-    assert "navigator.sendBeacon=function" in src
-    assert "auth\\/login|csp-report" in src
+
+    # Legacy shell: the fetch/sendBeacon CSRF wrapper lives inline in
+    # static/index.html. (The React shell delegates the same header injection
+    # to frontend/src/api/client.ts, covered by its own unit tests.)
+    legacy_src = (api_config.get_static_root() / "index.html").read_text(encoding="utf-8")
+    assert "X-Hermes-CSRF-Token" in legacy_src
+    assert "window.fetch=function" in legacy_src
+    assert "navigator.sendBeacon=function" in legacy_src
+    assert "auth\\/login|csp-report" in legacy_src
 
 
 def test_index_shell_injects_session_bound_csrf_token(monkeypatch):

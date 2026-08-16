@@ -12170,11 +12170,13 @@ _INDEX_SHELL_CACHE_LOCK = threading.Lock()
 
 
 def _render_index_shell_base() -> str:
-    """Return static/index.html with the process-constant tokens substituted.
+    """Return the app-shell index.html with the process-constant tokens substituted.
 
-    Cached and invalidated on (size, mtime_ns) change. The CSRF token and
-    extension-tag injection are intentionally NOT applied here — they vary per
-    request and are applied by the caller against this base string.
+    Reads api_config.get_index_html_path(), which prefers the built React
+    frontend (frontend/dist/index.html) and falls back to static/index.html
+    (Task 8.4). Cached and invalidated on (size, mtime_ns) change. The CSRF
+    token and extension-tag injection are intentionally NOT applied here — they
+    vary per request and are applied by the caller against this base string.
     """
     from api.updates import WEBUI_VERSION
 
@@ -12747,6 +12749,9 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path.startswith("/static/"):
         return _serve_static(handler, parsed)
+
+    if parsed.path.startswith("/assets/"):
+        return _serve_dist_assets(handler, parsed)
 
 
     if parsed.path == "/api/session/worktree/status":
@@ -16978,13 +16983,13 @@ _STATIC_CACHE: dict = {}
 _STATIC_CACHE_LOCK = threading.Lock()
 
 
-def _serve_static(handler, parsed):
-    static_root = api_config.get_static_root().resolve()
-    # Strip the leading '/static/' prefix, then resolve and sandbox
-    rel = parsed.path[len("/static/") :]
-    static_file = (static_root / rel).resolve()
+def _serve_from_root(handler, parsed, root: Path, prefix: str):
+    root = root.resolve()
+    # Strip the leading prefix, then resolve and sandbox
+    rel = parsed.path[len(prefix):]
+    static_file = (root / rel).resolve()
     try:
-        static_file.relative_to(static_root)
+        static_file.relative_to(root)
     except ValueError:
         return j(handler, {"error": "not found"}, status=404)
     if not static_file.exists() or not static_file.is_file():
@@ -17050,6 +17055,23 @@ def _serve_static(handler, parsed):
     handler.end_headers()
     handler.wfile.write(body)
     return True
+
+
+def _serve_static(handler, parsed):
+    return _serve_from_root(handler, parsed, api_config.get_static_root(), "/static/")
+
+
+def _serve_dist_assets(handler, parsed):
+    """Serve hashed build assets from frontend/dist/assets/.
+
+    Only active when a frontend build exists; otherwise the caller falls
+    through to the regular 404 path. Same sandbox + cache + gzip + ETag
+    behavior as /static/* (shared _serve_from_root implementation).
+    """
+    dist_root = api_config.get_dist_root()
+    if not dist_root.exists():
+        return j(handler, {"error": "not found"}, status=404)
+    return _serve_from_root(handler, parsed, dist_root / "assets", "/assets/")
 
 
 def _handle_session_export(handler, parsed):

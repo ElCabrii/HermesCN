@@ -121,4 +121,9 @@ def test_checkout_static_root_stays_repo_relative():
     import api.config as api_config
 
     assert api_config.get_static_root() == ROOT / "static"
-    assert api_config.get_index_html_path() == ROOT / "static" / "index.html"
+    # The index shell prefers frontend/dist/index.html when a build exists
+    # (Task 8.4) and falls back to the legacy static shell otherwise. Either
+    # way the path must stay repo-relative.
+    dist_index = ROOT / "frontend" / "dist" / "index.html"
+    expected = dist_index if dist_index.exists() else ROOT / "static" / "index.html"
+    assert api_config.get_index_html_path() == expected

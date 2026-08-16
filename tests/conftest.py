@@ -621,6 +621,37 @@ def _strip_skip_onboarding_env():
     if prior is not None:
         os.environ["HERMES_WEBUI_SKIP_ONBOARDING"] = prior
 
+
+@pytest.fixture(autouse=True, scope="session")
+def _hide_frontend_dist_for_legacy_suite():
+    """Keep the legacy suite deterministic when a local frontend build exists.
+
+    Task 8.4 made the server prefer frontend/dist/index.html over the legacy
+    static/ shell when a build is present. ~30 legacy tests (sprint*/layout/
+    issue5932) assert on the legacy shell served by GET /, so a local
+    `pnpm build` would break them even though CI (which never builds the
+    frontend) stays green. Hiding frontend/dist for the session restores the
+    CI-equivalent legacy baseline; the dist-serving path is exercised by
+    tests/test_frontend_dist_serving.py, which materializes its own fake
+    build via fixtures. dist/ is gitignored, so the rename is safe.
+    """
+    dist_dir = pathlib.Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    backup = dist_dir.with_name("dist.legacy-suite-testbak")
+    # Recover from a crashed previous run that left the real build parked.
+    if backup.exists():
+        if not dist_dir.exists():
+            shutil.move(str(backup), str(dist_dir))
+        else:
+            shutil.rmtree(backup)  # stale marker; the real build is present
+    if not dist_dir.exists():
+        yield
+        return
+    shutil.move(str(dist_dir), str(backup))
+    try:
+        yield
+    finally:
+        shutil.move(str(backup), str(dist_dir))
+
 def pytest_collection_modifyitems(config, items):
     """Auto-skip agent-dependent tests when hermes-agent is not available.
 

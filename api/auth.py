@@ -1087,6 +1087,7 @@ def check_auth(handler, parsed) -> bool:
         )
         or parsed.path.startswith('/static/')
         or parsed.path.startswith('/session/static/')
+        or parsed.path.startswith('/assets/')
     ):
         return True
     cookie_val = parse_cookie(handler)

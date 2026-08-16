@@ -49,7 +49,11 @@ def _get(path, request_headers=None):
 def test_config_owner_returns_checkout_static_root():
     static_root = ROOT / "static"
     assert api_config.get_static_root() == static_root
-    assert api_config.get_index_html_path() == static_root / "index.html"
+    # The index shell prefers frontend/dist/index.html when a build exists
+    # (Task 8.4) and falls back to the legacy static shell otherwise.
+    dist_index = ROOT / "frontend" / "dist" / "index.html"
+    expected = dist_index if dist_index.exists() else static_root / "index.html"
+    assert api_config.get_index_html_path() == expected
 
 
 def test_manifest_routes_follow_selected_static_root(tmp_path, monkeypatch):

@@ -67,4 +67,63 @@ describe('api()', () => {
     expect(err).toBeInstanceOf(ApiError)
     expect(err).toMatchObject({ body: { error: 'Session not found' } })
   })
+
+  it('injects X-Hermes-CSRF-Token on unsafe methods when a token is configured', async () => {
+    window.__HERMES_CONFIG__ = { csrfToken: 'token-abc' }
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      vi.stubGlobal('fetch', fetchMock)
+      await api('/api/session/delete', { method: 'POST' })
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+      expect(new Headers(init.headers).get('X-Hermes-CSRF-Token')).toBe('token-abc')
+    } finally {
+      delete window.__HERMES_CONFIG__
+    }
+  })
+
+  it('does not inject the CSRF header on GET requests', async () => {
+    window.__HERMES_CONFIG__ = { csrfToken: 'token-abc' }
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      vi.stubGlobal('fetch', fetchMock)
+      await api('/api/sessions')
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+      expect(new Headers(init.headers).has('X-Hermes-CSRF-Token')).toBe(false)
+    } finally {
+      delete window.__HERMES_CONFIG__
+    }
+  })
+
+  it('does not inject the CSRF header when no token is configured', async () => {
+    delete window.__HERMES_CONFIG__
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    await api('/api/session/delete', { method: 'POST' })
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(new Headers(init.headers).has('X-Hermes-CSRF-Token')).toBe(false)
+  })
+
+  it('keeps a caller-provided X-Hermes-CSRF-Token instead of overwriting it', async () => {
+    window.__HERMES_CONFIG__ = { csrfToken: 'token-abc' }
+    try {
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValue(new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      vi.stubGlobal('fetch', fetchMock)
+      await api('/api/session/delete', {
+        method: 'POST',
+        headers: { 'X-Hermes-CSRF-Token': 'explicit-token' },
+      })
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+      expect(new Headers(init.headers).get('X-Hermes-CSRF-Token')).toBe('explicit-token')
+    } finally {
+      delete window.__HERMES_CONFIG__
+    }
+  })
 })

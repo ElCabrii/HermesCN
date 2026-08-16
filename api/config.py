@@ -8571,7 +8571,22 @@ def get_static_root() -> Path:
     return REPO_ROOT / "static"
 
 
+def get_dist_root() -> Path:
+    """Root of the built React frontend (frontend/dist/), if a build exists."""
+    return REPO_ROOT / "frontend" / "dist"
+
+
 def get_index_html_path() -> Path:
+    """Path of the app-shell index.html.
+
+    Prefers the built React frontend (frontend/dist/index.html) when a build
+    is present, falling back to the legacy static/index.html shell otherwise.
+    Callers (e.g. _render_index_shell_base) key their caches on the returned
+    path, so switching between the two shells is picked up automatically.
+    """
+    dist_index = get_dist_root() / "index.html"
+    if dist_index.exists():
+        return dist_index
     return get_static_root() / "index.html"
 
 
