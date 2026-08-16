@@ -1,30 +1,55 @@
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import { useContext, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
 import { useAtomValue } from 'jotai'
+import { toast } from 'sonner'
+import { ThemeContext } from '@/theme/ThemeProvider'
+import { DEFAULT_SKIN, DEFAULT_THEME, type ThemeMode } from '@/theme/skins'
 import { getApprovalPending, type ApprovalEntry, type ClarifyEntry } from '@/api/chat'
 import { getModels, type ModelsCatalog } from '@/api/models'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  attachStream,
   busyAtom,
   cancelStream,
   chatStore,
+  loadSession,
   messagesAtom,
+  newSession as storeNewSession,
   onChatEvent,
   pendingApprovalAtom,
   pendingClarifyAtom,
   pendingFilesAtom,
   sendMessage,
   sessionAtom,
+  streamIdAtom,
+  terminalOpenAtom,
 } from './chatStore'
 import { ApprovalCard } from './ApprovalCard'
 import { ClarifyDialog } from './ClarifyDialog'
 import { getSpeechRecognitionCtor, isMicAvailable, type SpeechRecognitionLike } from './mic'
 import { ModelSelector } from './ModelSelector'
 import { PendingFiles } from './PendingFiles'
+import { SlashMenu, type SlashMatch } from './SlashMenu'
+import {
+  activeSlashOffset,
+  consumeForcedSkillDirective,
+  getCommand,
+  getSlashAutocompleteMatches,
+  parseCommand,
+  runSlashCommand,
+  type SlashCommandContext,
+} from './slashCommands'
 import { ArrowUpIcon, MicIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
 
 /** Approval fallback poll cadence (legacy messages.js `_startApprovalFallbackPoll`). */
 const APPROVAL_POLL_MS = 1500
+
+/** Stable one-liner for an unknown error value (toast payloads). */
+function errorMessage(e: unknown): string {
+  return e && typeof e === 'object' && 'message' in e
+    ? String((e as { message: unknown }).message)
+    : String(e ?? 'unknown error')
+}
 
 function sameApproval(a: ApprovalEntry | null, b: ApprovalEntry | null): boolean {
   if (!a || !b) return a === b
@@ -42,6 +67,13 @@ export function Composer() {
   const [model, setModel] = useState<string | null>(null)
   const [micListening, setMicListening] = useState(false)
   const [catalog, setCatalog] = useState<ModelsCatalog | null>(null)
+  // Slash-command autocomplete state (plan Task 8.7). `slashTextRef` mirrors
+  // the draft so async autocomplete results can be dropped when the user
+  // typed past them (stale-guard, same pattern as the legacy `input` guard).
+  const [slashMatches, setSlashMatches] = useState<SlashMatch[]>([])
+  const [slashOpen, setSlashOpen] = useState(false)
+  const [slashSelected, setSlashSelected] = useState(0)
+  const slashTextRef = useRef('')
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -51,7 +83,12 @@ export function Composer() {
   const pendingFiles = useAtomValue(pendingFilesAtom, { store: chatStore })
   const approval = useAtomValue(pendingApprovalAtom, { store: chatStore })
   const clarify = useAtomValue(pendingClarifyAtom, { store: chatStore })
+  const streamId = useAtomValue(streamIdAtom, { store: chatStore })
   const sessionId = session?.session_id ?? null
+
+  // Theme seams for `/theme`; null when no ThemeProvider is mounted (tests,
+  // embedders) — commands then fall back to the defaults.
+  const themeContext = useContext(ThemeContext)
 
   const canSend = !busy && (text.trim().length > 0 || pendingFiles.length > 0)
 
@@ -162,14 +199,187 @@ export function Composer() {
     return Math.min(100, Math.max(0, Math.round((tokens / ctxLength) * 100)))
   }, [session, messages])
 
+  /**
+   * Range of the active slash token being completed (`/name [arg]`), or null
+   * when the draft has no active slash token. Used by autocomplete selection
+   * to replace exactly the token under the cursor and keep prefix + suffix.
+   */
+  const slashTokenRange = (value: string): { start: number; end: number } | null => {
+    const offset = activeSlashOffset(value)
+    if (offset < 0) return null
+    let nameEnd = offset + 1
+    while (nameEnd < value.length && !/\s/.test(value[nameEnd])) nameEnd++
+    let end = nameEnd
+    let argStart = nameEnd
+    while (argStart < value.length && /\s/.test(value[argStart])) argStart++
+    if (argStart < value.length) {
+      let argEnd = argStart
+      while (argEnd < value.length && !/\s/.test(value[argEnd])) argEnd++
+      end = argEnd
+    }
+    return { start: offset, end }
+  }
+
+  /**
+   * Refresh the slash autocomplete matches for the current draft. The menu is
+   * open whenever a valid slash token is active and matches exist (legacy
+   * `showCmdDropdown` on every input). Async results are dropped when the
+   * draft moved on while the catalog lookups were in flight.
+   */
+  const refreshSlashAutocomplete = (value: string) => {
+    slashTextRef.current = value
+    if (activeSlashOffset(value) < 0) {
+      setSlashMatches([])
+      setSlashOpen(false)
+      return
+    }
+    void getSlashAutocompleteMatches(value).then((matches) => {
+      if (slashTextRef.current !== value) return
+      setSlashMatches(matches)
+      setSlashOpen(matches.length > 0)
+      setSlashSelected((sel) => (matches.length === 0 ? 0 : Math.min(sel, matches.length - 1)))
+    })
+  }
+
+  /** Insert a selected autocomplete row into the draft, keeping prefix/suffix. */
+  const applySlashMatch = (match: SlashMatch) => {
+    const current = slashTextRef.current
+    const range = slashTokenRange(current)
+    if (!range) {
+      setSlashOpen(false)
+      return
+    }
+    const prefix = current.slice(0, range.start)
+    const suffix = current.slice(range.end).replace(/^\s+/, '')
+    const insertion = match.kind === 'command' ? `/${match.name} ` : `/${match.parent} ${match.value} `
+    const next = `${prefix}${insertion}${suffix}`
+    slashTextRef.current = next
+    setText(next)
+    // Re-run autocomplete so sub-arg rows open right after a command select
+    // (legacy re-queries after filling `/name `).
+    refreshSlashAutocomplete(next)
+  }
+
+  /**
+   * Live UI context for the slash command registry: the store atoms and the
+   * surface seams (theme, terminal, mic, drafts) captured at dispatch time.
+   */
+  const buildSlashContext = (): SlashCommandContext => ({
+    session,
+    busy,
+    streamId,
+    messages,
+    sessionId,
+    appendAssistant: (content) => {
+      chatStore.set(messagesAtom, [
+        ...chatStore.get(messagesAtom),
+        { role: 'assistant', content, ts: Date.now() / 1000 },
+      ])
+    },
+    replaceMessages: (next) => chatStore.set(messagesAtom, next),
+    setSession: (next) => chatStore.set(sessionAtom, next),
+    setBusy: (next) => chatStore.set(busyAtom, next),
+    setStreamId: (next) => chatStore.set(streamIdAtom, next),
+    setDraft: (next) => {
+      slashTextRef.current = next
+      setText(next)
+    },
+    newSession: () => storeNewSession(),
+    loadSession: (sid) => loadSession(sid),
+    sendAsUser: (text) => sendMessage(text, [], model ?? undefined),
+    cancelStream: () => cancelStream(),
+    attachStream: (sid, streamId) => attachStream(sid, streamId),
+    getTheme: () =>
+      themeContext
+        ? { theme: themeContext.theme, skin: themeContext.skin }
+        : { theme: DEFAULT_THEME, skin: DEFAULT_SKIN },
+    setTheme: (theme: ThemeMode) => themeContext?.setTheme(theme),
+    setSkin: (skin: string) => themeContext?.setSkin(skin),
+    openTerminal: () => chatStore.set(terminalOpenAtom, true),
+    micAvailable: !micUnavailable,
+    toggleMic: () => toggleMic(),
+    toast: (message) => toast(message),
+    toastError: (message) => toast(message),
+  })
+
+  /**
+   * Send pipeline (plan Task 8.7). An exact slash command dispatches to the
+   * registry first and never falls through as a chat message; commands
+   * without `noEcho` get a user echo (legacy #840). A handler returning
+   * `false` opts out — the text then follows the normal send path. Ordinary
+   * sends consume any pending forced-skill directive (legacy send() await)
+   * and prepend it to the user turn.
+   */
+  const runComposerSend = async (message: string) => {
+    const trimmed = message.trim()
+    const parsed = parseCommand(trimmed)
+    const command = parsed ? getCommand(parsed.name) : undefined
+    if (parsed && command) {
+      let handled = false
+      try {
+        handled = await runSlashCommand(command, parsed.args, buildSlashContext())
+      } catch (error) {
+        // A crashing handler must not lose the draft or produce an unhandled
+        // rejection — surface the error and fall through to the normal send.
+        toast(errorMessage(error))
+      }
+      if (handled) {
+        if (!command.noEcho) {
+          chatStore.set(messagesAtom, [
+            ...chatStore.get(messagesAtom),
+            { role: 'user', content: trimmed, ts: Date.now() / 1000 },
+          ])
+        }
+        return
+      }
+      // Handler opted out (legacy `fn(...) === false`): fall through.
+    }
+    const directive = await consumeForcedSkillDirective(sessionId ?? '')
+    const finalText = directive ? `${directive.directive}\n\n${directive.content}\n\n${message}` : message
+    await sendMessage(finalText, pendingFiles, model ?? undefined)
+  }
+
   const handleSend = () => {
     if (!canSend) return
     const message = text
     setText('')
-    void sendMessage(message, pendingFiles, model ?? undefined)
+    slashTextRef.current = ''
+    setSlashMatches([])
+    setSlashOpen(false)
+    void runComposerSend(message)
   }
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    // With the autocomplete menu open, arrows navigate, Tab/Enter select the
+    // highlighted row, and Escape closes the menu (legacy keydown contract).
+    if (slashOpen && slashMatches.length > 0) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setSlashSelected((i) => (i + 1) % slashMatches.length)
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setSlashSelected((i) => (i - 1 + slashMatches.length) % slashMatches.length)
+        return
+      }
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        applySlashMatch(slashMatches[slashSelected] ?? slashMatches[0])
+        return
+      }
+      if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+        event.preventDefault()
+        applySlashMatch(slashMatches[slashSelected] ?? slashMatches[0])
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setSlashSelected(0)
+        setSlashOpen(false)
+        return
+      }
+    }
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault()
       handleSend()
@@ -220,6 +430,14 @@ export function Composer() {
 
   return (
     <footer data-testid="composer" className="border-t border-border bg-background/95 px-3 pt-2 pb-2.5">
+      {slashOpen && slashMatches.length > 0 && (
+        <SlashMenu
+          matches={slashMatches}
+          selected={slashSelected}
+          onSelect={applySlashMatch}
+          onMouseEnter={(index) => setSlashSelected(index)}
+        />
+      )}
       <PendingFiles files={pendingFiles} onRemove={(index) => chatStore.set(pendingFilesAtom, pendingFiles.filter((_, i) => i !== index))} />
       <div className="flex items-end gap-1.5">
         <Button
@@ -236,7 +454,12 @@ export function Composer() {
         <Textarea
           aria-label="Message"
           value={text}
-          onChange={(event) => setText(event.target.value)}
+          onChange={(event) => {
+            const value = event.target.value
+            slashTextRef.current = value
+            setText(value)
+            refreshSlashAutocomplete(value)
+          }}
           onKeyDown={handleKeyDown}
           placeholder="Message…"
           rows={1}

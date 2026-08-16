@@ -13,6 +13,7 @@ import {
 } from '@/api/chat'
 import { openChatStream, type ChatStreamEvent, type ChatStreamHandlers } from '@/api/sse'
 import { toast } from 'sonner'
+import { shiftQueuedSessionMessage } from './queue'
 
 /**
  * Chat state store (Jotai).
@@ -110,6 +111,9 @@ export const reconnectAtom = atom<ReconnectState | null>(null)
 /** Live tool cards for the current run (`tool` frames; cleared on terminal). */
 export const liveToolCallsAtom = atom<LiveToolCall[]>([])
 
+/** Whether the workspace terminal panel is open (slash `/terminal` toggle). */
+export const terminalOpenAtom = atom(false)
+
 /** Clear the streaming-surface atoms (approval/clarify/compression/reconnect/live tools). */
 function resetStreamSurface(): void {
   chatStore.set(pendingApprovalAtom, null)
@@ -166,6 +170,7 @@ async function handleStreamError(streamId: string, activeSid: string): Promise<v
     chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), activeSid))
     chatStore.set(reconnectAtom, null)
     toast('Connection lost.')
+    drainQueuedSessionMessage()
     return
   }
 
@@ -204,6 +209,7 @@ async function handleStreamError(streamId: string, activeSid: string): Promise<v
   } catch {
     // Refresh failed; stream state is already cleared — nothing else to do.
   }
+  drainQueuedSessionMessage()
 }
 
 /** Handlers shared by the initial open and the reconnect re-attach. */
@@ -404,7 +410,46 @@ export async function cancelStream(): Promise<void> {
     chatStore.set(busyAtom, false)
     chatStore.set(streamIdAtom, null)
     chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), sid))
+    // The cancelled turn is over — a queued follow-up can go now (legacy
+    // `setBusy(false)` drain; `/interrupt` relies on this).
+    drainQueuedSessionMessage()
   }
+}
+
+/**
+ * Attach an SSE stream that the store did not start (slash-command kickoffs:
+ * `/goal` continuation streams, `/btw` side-question streams). The stream
+ * owns the session's busy state and transcript exactly like a normal send —
+ * events apply to the session the stream belongs to, and the store's
+ * terminal-frame handling clears busy/stream state.
+ */
+export function attachStream(sid: string, streamId: string): void {
+  closeActiveStream()
+  chatStore.set(streamIdAtom, streamId)
+  chatStore.set(busyAtom, true)
+  chatStore.set(inflightAtom, {
+    ...chatStore.get(inflightAtom),
+    [sid]: { messages: chatStore.get(messagesAtom), uploaded: [] },
+  })
+  activeStreamClose = openChatStream(streamId, streamHandlers(streamId, sid))
+}
+
+/**
+ * Drain one queued follow-up message for the session whose stream just
+ * finished (plan Task 8.7; legacy `setBusy(false)` queue drain). Fires only
+ * when nothing is running and the queue's session is still the active one, so
+ * a stale terminal frame or a session switch can never send a queued message
+ * at the wrong session — leftovers simply stay queued for the next completed
+ * turn while that session is the active view.
+ */
+function drainQueuedSessionMessage(): void {
+  if (chatStore.get(busyAtom)) return
+  if (chatStore.get(streamIdAtom)) return
+  const sid = chatStore.get(sessionAtom)?.session_id
+  if (!sid) return
+  const next = shiftQueuedSessionMessage(sid)
+  if (!next) return
+  void sendMessage(next.text, next.files ?? [], next.model || undefined)
 }
 
 /**
@@ -505,6 +550,7 @@ export function applyStreamEvent(event: ChatStreamEvent): void {
       chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), sid))
       closeActiveStream()
       resetStreamSurface()
+      drainQueuedSessionMessage()
       toast(message)
       break
     }
@@ -522,6 +568,7 @@ export function applyStreamEvent(event: ChatStreamEvent): void {
       chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), sid))
       closeActiveStream()
       resetStreamSurface()
+      drainQueuedSessionMessage()
       toast('Cancelled')
       break
     }
@@ -545,6 +592,7 @@ export function applyStreamEvent(event: ChatStreamEvent): void {
       chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), sid))
       closeActiveStream()
       resetStreamSurface()
+      drainQueuedSessionMessage()
       break
     }
     case 'error':
@@ -554,6 +602,7 @@ export function applyStreamEvent(event: ChatStreamEvent): void {
       chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), sid))
       closeActiveStream()
       resetStreamSurface()
+      drainQueuedSessionMessage()
       break
   }
 

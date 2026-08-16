@@ -8,11 +8,13 @@ import {
   pendingClarifyAtom,
   reconnectAtom,
   sessionAtom,
+  terminalOpenAtom,
   type Session,
 } from './chatStore'
 import { ChatPage } from './ChatPage'
 import { openChatStream } from '@/api/sse'
 import { getModels } from '@/api/models'
+import { closeTerminal, openTerminalOutput, startTerminal } from '@/api/terminal'
 
 vi.mock('@/api/client', () => ({ api: vi.fn() }))
 vi.mock('@/api/chat', () => ({
@@ -28,6 +30,36 @@ vi.mock('@/api/sse', () => ({ openChatStream: vi.fn() }))
 vi.mock('@/api/models', () => ({ getModels: vi.fn() }))
 vi.mock('sonner', () => ({ toast: vi.fn() }))
 
+// Minimal xterm stand-ins so the embedded TerminalPanel can mount in jsdom.
+const { FakeTerminal, FakeFitAddon } = vi.hoisted(() => {
+  class FakeTerminal {
+    loadAddon(): void {}
+    open(): void {}
+    dispose(): void {}
+    write(): void {}
+    writeln(): void {}
+    onData(): { dispose(): void } {
+      return { dispose: () => {} }
+    }
+    onResize(): { dispose(): void } {
+      return { dispose: () => {} }
+    }
+  }
+  class FakeFitAddon {
+    fit(): void {}
+  }
+  return { FakeTerminal, FakeFitAddon }
+})
+vi.mock('@xterm/xterm', () => ({ Terminal: FakeTerminal }))
+vi.mock('@xterm/addon-fit', () => ({ FitAddon: FakeFitAddon }))
+vi.mock('@/api/terminal', () => ({
+  startTerminal: vi.fn(),
+  sendTerminalInput: vi.fn(),
+  resizeTerminal: vi.fn(),
+  closeTerminal: vi.fn(),
+  openTerminalOutput: vi.fn(),
+}))
+
 const sessionA: Session = { session_id: 'a', title: 'Session A', model: 'test-model', messages: [] }
 
 beforeEach(() => {
@@ -38,12 +70,17 @@ beforeEach(() => {
   chatStore.set(pendingClarifyAtom, null)
   chatStore.set(reconnectAtom, null)
   chatStore.set(compressingAtom, null)
+  chatStore.set(terminalOpenAtom, false)
   vi.mocked(openChatStream).mockReturnValue(vi.fn())
   vi.mocked(getModels).mockResolvedValue({
     active_provider: 'openrouter',
     default_model: 'default-model',
     groups: [],
   })
+  // TerminalPanel promise seams.
+  vi.mocked(startTerminal).mockResolvedValue({ ok: true, session_id: 'a', workspace: '', running: true })
+  vi.mocked(closeTerminal).mockResolvedValue({ ok: true, closed: true })
+  vi.mocked(openTerminalOutput).mockReturnValue(() => {})
 })
 
 describe('ChatPage', () => {
@@ -101,5 +138,22 @@ describe('ChatPage', () => {
     await waitFor(() => expect(screen.getByText('Clarification needed')).toBeInTheDocument())
     chatStore.set(pendingClarifyAtom, null)
     await waitFor(() => expect(screen.queryByText('Clarification needed')).not.toBeInTheDocument())
+  })
+
+  it('mounts the terminal dock while terminalOpenAtom is set and unmounts it on close', async () => {
+    render(<ChatPage />)
+    expect(screen.queryByTestId('terminal-panel')).not.toBeInTheDocument()
+
+    // /terminal sets the atom — the dock appears above the composer.
+    act(() => {
+      chatStore.set(terminalOpenAtom, true)
+    })
+    await waitFor(() => expect(screen.getByTestId('terminal-panel')).toBeInTheDocument())
+
+    // Closing the panel resets the atom and tears the dock down.
+    act(() => {
+      chatStore.set(terminalOpenAtom, false)
+    })
+    await waitFor(() => expect(screen.queryByTestId('terminal-panel')).not.toBeInTheDocument())
   })
 })

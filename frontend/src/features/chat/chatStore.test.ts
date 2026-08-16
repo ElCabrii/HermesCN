@@ -4,6 +4,7 @@ import { cancelStream as apiCancelStream, startChat, uploadFile } from '@/api/ch
 import type { CancelStreamResult, ChatStartResult } from '@/api/chat'
 import { openChatStream } from '@/api/sse'
 import { toast } from 'sonner'
+import { getQueuedSessionCount, queueSessionMessage, shiftQueuedSessionMessage } from './queue'
 import {
   applyStreamEvent,
   busyAtom,
@@ -423,5 +424,59 @@ describe('onChatEvent', () => {
 
     expect(listener).not.toHaveBeenCalled()
     unsubscribe()
+  })
+})
+
+describe('queued session messages (plan Task 8.7)', () => {
+  it('drains one queued message into the next turn when the stream completes', async () => {
+    serverSessions.set('q-a', makeSession('q-a'))
+    await loadSession('q-a')
+    queueSessionMessage('q-a', { text: 'follow-up' })
+
+    await sendMessage('first')
+    applyStreamEvent({ type: 'done', session: { session_id: 'q-a' }, usage: null })
+
+    expect(startChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({ session_id: 'q-a', message: 'follow-up' }),
+    )
+    expect(getQueuedSessionCount('q-a')).toBe(0)
+    await vi.waitFor(() => expect(chatStore.get(busyAtom)).toBe(true))
+  })
+
+  it('drains a queued message after the user cancels the running turn', async () => {
+    serverSessions.set('q-a', makeSession('q-a'))
+    await loadSession('q-a')
+    queueSessionMessage('q-a', { text: 'after-cancel' })
+
+    await sendMessage('first')
+    await cancelStream()
+
+    expect(startChat).toHaveBeenLastCalledWith(
+      expect.objectContaining({ session_id: 'q-a', message: 'after-cancel' }),
+    )
+    expect(getQueuedSessionCount('q-a')).toBe(0)
+  })
+
+  it('never fires a queued message at a session the user switched away from', async () => {
+    serverSessions.set('q-a', makeSession('q-a'))
+    serverSessions.set('q-b', makeSession('q-b'))
+    await loadSession('q-a')
+    queueSessionMessage('q-a', { text: 'for-a' })
+
+    await sendMessage('first') // q-a streaming
+    await loadSession('q-b') // user switches away; q-b is idle
+
+    // A stale terminal frame for the finished q-a turn must not unlock q-b
+    // or fire the queued message — the drain only ever targets the active
+    // session, and applyStreamEvent ignores frames with no stream attached.
+    applyStreamEvent({ type: 'done', session: { session_id: 'q-a' }, usage: null })
+
+    expect(chatStore.get(busyAtom)).toBe(false)
+    expect(chatStore.get(sessionAtom)?.session_id).toBe('q-b')
+    expect(getQueuedSessionCount('q-a')).toBe(1) // still queued for q-a
+    expect(startChat).toHaveBeenCalledTimes(1)
+
+    // Cleanup: leave the module queue empty for later tests.
+    shiftQueuedSessionMessage('q-a')
   })
 })

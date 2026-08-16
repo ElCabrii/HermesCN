@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { api } from '@/api/client'
 import {
   cancelStream as apiCancelStream,
   getApprovalPending,
@@ -413,5 +414,148 @@ describe('Composer — context usage badge', () => {
     renderComposer()
     expect(screen.getByTestId('context-usage')).not.toHaveAttribute('data-context-pct')
     expect(screen.getByTitle('Context usage unknown')).toBeInTheDocument()
+  })
+})
+
+describe('Composer — slash command autocomplete', () => {
+  it('shows the command menu while typing a valid slash token', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+
+    await user.type(messageBox(), '/c')
+
+    const menu = await screen.findByTestId('slash-menu')
+    expect(within(menu).getByText('/clear')).toBeInTheDocument()
+    expect(within(menu).getByText('/compress')).toBeInTheDocument()
+    expect(within(menu).getByText('/compact')).toBeInTheDocument()
+  })
+
+  it('does not open the menu for plain text or a mid-word slash', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+
+    await user.type(messageBox(), 'hello')
+    expect(screen.queryByTestId('slash-menu')).not.toBeInTheDocument()
+
+    await user.clear(messageBox())
+    await user.type(messageBox(), 'say hello/cl')
+    expect(screen.queryByTestId('slash-menu')).not.toBeInTheDocument()
+  })
+
+  it('ArrowDown moves the highlight and Enter inserts the selected command with a trailing space', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+
+    await user.type(messageBox(), '/c')
+    await screen.findByTestId('slash-menu')
+    await user.keyboard('{ArrowDown}{Enter}')
+
+    expect(messageBox()).toHaveValue('/compress ')
+  })
+
+  it('Tab inserts the highlighted command', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+
+    await user.type(messageBox(), '/new')
+    await screen.findByTestId('slash-menu')
+    await user.keyboard('{Tab}')
+
+    expect(messageBox()).toHaveValue('/new ')
+  })
+
+  it('Escape closes the menu without touching the draft', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+
+    await user.type(messageBox(), '/cl')
+    await screen.findByTestId('slash-menu')
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByTestId('slash-menu')).not.toBeInTheDocument()
+    expect(messageBox()).toHaveValue('/cl')
+  })
+
+  it('preserves the draft prefix when a command is selected mid-draft', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+
+    await user.type(messageBox(), 'say /cl')
+    await screen.findByTestId('slash-menu')
+    await user.keyboard('{Enter}')
+
+    expect(messageBox()).toHaveValue('say /clear ')
+  })
+
+  it('completes sub-args from the live model catalog', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+
+    await user.type(messageBox(), '/model m')
+    const menu = await screen.findByTestId('slash-menu')
+    expect(within(menu).getByText('model-a')).toBeInTheDocument()
+    expect(within(menu).getByText('model-b')).toBeInTheDocument()
+    await user.keyboard('{Enter}')
+
+    expect(messageBox()).toHaveValue('/model model-a ')
+  })
+})
+
+describe('Composer — slash command dispatch', () => {
+  it('runs /clear instead of sending it as a chat message', async () => {
+    const user = userEvent.setup()
+    chatStore.set(messagesAtom, [{ role: 'assistant', content: 'previous turn' }])
+    renderComposer()
+
+    await user.type(messageBox(), '/clear')
+    await screen.findByTestId('slash-menu')
+    await user.keyboard('{Escape}') // close the menu so Enter submits the draft
+    await user.keyboard('{Enter}')
+
+    // The command ran: transcript cleared, no chat turn started, composer empty.
+    await waitFor(() => expect(chatStore.get(messagesAtom)).toEqual([]))
+    expect(startChat).not.toHaveBeenCalled()
+    expect(toast).toHaveBeenCalledWith('Conversation cleared')
+    expect(messageBox()).toHaveValue('')
+  })
+
+  it('runs /new through the session creation seam without starting a chat turn', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+
+    await user.type(messageBox(), '/new')
+    await screen.findByTestId('slash-menu')
+    await user.keyboard('{Escape}')
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => expect(api).toHaveBeenCalledWith('/api/session/new', expect.anything()))
+    expect(startChat).not.toHaveBeenCalled()
+    expect(messageBox()).toHaveValue('')
+  })
+
+  it('falls through to the normal send path for an unknown command', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+
+    await user.type(messageBox(), '/frobnicate')
+    await user.keyboard('{Enter}')
+
+    await waitFor(() =>
+      expect(startChat).toHaveBeenCalledWith(expect.objectContaining({ session_id: 'a', message: '/frobnicate' })),
+    )
+  })
+
+  it('echoes non-noEcho commands as a user message but never calls the chat API', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+
+    await user.type(messageBox(), '/help')
+    await screen.findByTestId('slash-menu')
+    await user.keyboard('{Escape}')
+    await user.keyboard('{Enter}')
+
+    await waitFor(() => expect(chatStore.get(messagesAtom)).toContainEqual(expect.objectContaining({ role: 'user', content: '/help' })))
+    expect(startChat).not.toHaveBeenCalled()
+    expect(messageBox()).toHaveValue('')
   })
 })

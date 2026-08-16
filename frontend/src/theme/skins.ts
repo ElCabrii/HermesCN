@@ -123,7 +123,7 @@ export const SKINS: readonly Skin[] = [
  * Mirrors static/boot.js `_LEGACY_THEME_MAP` and api/config.py
  * `_SETTINGS_LEGACY_THEME_MAP` exactly — keep all three in sync.
  */
-const LEGACY_THEME_MAP: Record<string, { theme: ThemeMode; skin: string }> = {
+export const LEGACY_THEME_MAP: Record<string, { theme: ThemeMode; skin: string }> = {
   slate: { theme: 'dark', skin: 'slate' },
   solarized: { theme: 'dark', skin: 'poseidon' },
   monokai: { theme: 'dark', skin: 'sisyphus' },

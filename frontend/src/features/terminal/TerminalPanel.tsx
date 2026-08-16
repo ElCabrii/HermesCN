@@ -139,9 +139,12 @@ export interface TerminalPanelProps {
   sessionId: string
   /** Session workspace path; shown in the panel header. */
   workspace: string
+  /** Optional host hook fired when the panel closes itself (close button or
+   *  `exit` at the prompt) so the host can unmount it (terminalOpenAtom). */
+  onClose?: () => void
 }
 
-export function TerminalPanel({ sessionId, workspace }: TerminalPanelProps) {
+export function TerminalPanel({ sessionId, workspace, onClose }: TerminalPanelProps) {
   const { t } = useI18n()
   const containerRef = useRef<HTMLDivElement | null>(null)
   const termRef = useRef<Terminal | null>(null)
@@ -164,6 +167,7 @@ export function TerminalPanel({ sessionId, workspace }: TerminalPanelProps) {
     termRef.current = null
     setCollapsed(false)
     setClosed(true)
+    onClose?.()
   }
 
   // Start the PTY and attach the SSE output stream once per mount/restart.

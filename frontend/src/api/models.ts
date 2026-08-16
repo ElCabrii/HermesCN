@@ -24,6 +24,13 @@ export interface CatalogModel {
 export interface ModelGroup {
   provider: string
   models: CatalogModel[]
+  /** Canonical provider id (server emits it; the model picker ignores it). */
+  provider_id?: string
+  /**
+   * Catalog overflow tail (server emits it for large provider catalogs).
+   * Not rendered as picker options — only the slash autocomplete reaches it.
+   */
+  extra_models?: CatalogModel[]
 }
 
 /** Full /api/models response. */
@@ -31,6 +38,8 @@ export interface ModelsCatalog {
   active_provider: string | null
   default_model: string
   groups: ModelGroup[]
+  /** Model alias map (config.yaml `model.aliases`), e.g. { haiku: 'anthropic/...' }. */
+  aliases?: Record<string, string>
 }
 
 /** Fetch the model catalog grouped by provider. */

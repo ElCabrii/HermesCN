@@ -28,7 +28,6 @@ export interface ThemeContextValue {
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
-
 function readLocalValue(key: string): string | null {
   try {
     return localStorage.getItem(key)
@@ -149,4 +148,5 @@ export function useTheme(): ThemeContextValue {
   return context
 }
 
+export { ThemeContext }
 export type { Skin, ThemeMode }
