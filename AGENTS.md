@@ -1,4 +1,7 @@
-# Agent instructions for Hermes WebUI
+# Agent instructions for HermesCN
+
+HermesCN is a fork of Hermes WebUI. The Python backend is kept as-is; the
+frontend is being remade in React + Vite + shadcn/ui (see ARCHITECTURE.md).
 
 This file is the shared entry point for AI assistants working in this
 repository. Keep it project-specific and safe to publish. Do not put personal
@@ -24,6 +27,31 @@ For architecture, testing, or setup work, also read the matching reference:
 
 For UI or UX work, read `docs/UIUX-GUIDE.md` and `DESIGN.md` before
 changing layout, interaction flow, themes, chat rendering, or composer chrome.
+For work in `frontend/`, also read the frontend remake section of
+`ARCHITECTURE.md` (Section 5.0) and follow the migration rules there.
+
+## Frontend remake (HermesCN)
+
+The frontend is being remade in React + Vite + shadcn/ui while the Python
+backend stays unchanged. Target layout and rules:
+
+- `frontend/` is the new app; the Python backend stays at the repo root.
+  No Turborepo: there is a single JS package and a Python app it cannot
+  orchestrate.
+- Seam: the existing HTTP API (SSE streaming included) is the contract. The
+  frontend consumes it through a hand-written typed client in
+  `frontend/src/api/`, grown per migrated surface. No tRPC (requires a TS
+  backend).
+- Dev: the Vite dev server proxies `/api` and `/static` to the Python server
+  (default http://127.0.0.1:8787).
+- Prod: the Python server serves `frontend/dist/` instead of `static/` once
+  parity is reached; until then `static/` remains the fallback.
+- Migration is surface-by-surface (login → chat → sessions → workspace →
+  panels). Each migrated surface replaces its `static/` counterpart and its
+  frontend-coupled pytest tests; new frontend tests live in `frontend/`
+  (Vitest + Playwright).
+- Backend changes during the remake are limited to what the frontend strictly
+  needs (e.g. serving `dist/`). The Python test suite must keep passing.
 
 ## Onboarding and reinstall support
 
@@ -55,9 +83,15 @@ Follow that checklist's safety rules:
   system/Homebrew interpreter directly.
   If a direct pytest invocation reports an unsupported interpreter, rerun through
   `./scripts/test.sh` before debugging product code.
-- Prefer the existing Python + vanilla JavaScript structure. Do not add
-  dependencies, build tools, frameworks, or long-lived processes without clear
-  justification and a rollback story.
+- The Python backend (server.py, api/, tests/) is the stable core and stays
+  Python at the repo root. Do not port it to TypeScript or move it.
+- New frontend work goes in `frontend/` (React + Vite + TypeScript + Tailwind +
+  shadcn/ui). `static/` is the legacy vanilla-JS frontend: frozen except for
+  critical bug fixes, and removed surface-by-surface as `frontend/` reaches
+  parity. Do not add new features to `static/`.
+- The HTTP API is the contract between the two. Frontend code talks to it only
+  through the typed client in `frontend/src/api/`; do not change API behavior
+  without updating that client and the affected backend tests.
 - Update docs when changing setup, onboarding, runtime behavior, architecture,
   testing guidance, or user-facing workflows.
 - Do not edit `CHANGELOG.md` in ordinary contributor PRs. The release workflow
@@ -124,3 +158,27 @@ python3 bootstrap.py
 
 Do not include private machine instructions in this tracked file. Use a
 git-ignored local note for personal workflow details.
+
+## Skills (mandatory)
+
+Before replying, scan the skills below. If a skill matches or is even partially
+relevant to your task, you MUST load it with skill_view(name) and follow its
+instructions. Err on the side of loading — it is always better to have context
+you don't need than to miss critical steps, pitfalls, or established workflows.
+Skills contain specialized knowledge — API endpoints, tool-specific commands,
+and proven workflows that outperform general-purpose approaches. Load the skill
+even if you think you could handle the task with basic tools like web_search or
+terminal. Skills also encode the user's preferred approach, conventions, and
+quality standards for tasks like code review, planning, and testing — load them
+even for tasks you already know how to do, because the skill defines how it
+should be done here.
+Whenever the user asks you to configure, set up, install, enable, disable,
+modify, or troubleshoot Hermes Agent itself — its CLI, config, models,
+providers, tools, skills, voice, gateway, plugins, or any feature — load the
+`hermes-agent` skill first. It has the actual commands (e.g. `hermes config set
+…`, `hermes tools`, `hermes setup`) so you don't have to guess or invent
+workarounds.
+If a skill has issues, fix it with skill_manage(action='patch').
+After difficult/iterative tasks, offer to save as a skill. If a skill you loaded
+was missing steps, had wrong commands, or needed pitfalls you discovered, update
+it before finishing.
