@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite'
+import { defineConfig, configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { fileURLToPath, URL } from 'node:url'
@@ -17,5 +17,12 @@ export default defineConfig({
       '/static': { target: 'http://127.0.0.1:8787', changeOrigin: true },
       '/health': { target: 'http://127.0.0.1:8787', changeOrigin: true },
     },
+  },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: './src/test/setup.ts',
+    css: true,
+    exclude: [...configDefaults.exclude, 'e2e/**'],
   },
 })
