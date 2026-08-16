@@ -132,6 +132,193 @@
   --sidebar-ring: #c6ac8f;
 }
 
+/* ── Skins (Task 8.2, THEMES.md) ──────────────────────────────────────────
+   Accent palettes applied via data-skin on <html> (the provider clears the
+   attribute for the default skin). Values are ported from static/style.css;
+   legacy tokens map onto the Tailwind palette as:
+     --accent / --accent-hover   → --primary / --accent
+     --accent-text               → --accent-foreground
+     --focus-ring                → --ring
+     --bg / --surface / --border → --background / --card+--popover / --border
+     --user-bubble-bg            → --secondary
+   Each skin stays minimal (5-8 overrides); light block first, then the dark
+   block so it wins at equal specificity (same ordering as static/style.css). */
+:root[data-skin="ares"] {
+  --primary: #c0392b;
+  --primary-foreground: #ffffff;
+  --accent: #c0392b;
+  --accent-foreground: #922b21;
+  --ring: #c0392b;
+}
+.dark[data-skin="ares"] {
+  --primary: #ff4444;
+  --primary-foreground: #ffffff;
+  --accent: #ff4444;
+  --accent-foreground: #ff4444;
+  --ring: #ff4444;
+}
+:root[data-skin="mono"] {
+  --primary: #666666;
+  --primary-foreground: #ffffff;
+  --accent: #666666;
+  --accent-foreground: #555555;
+  --ring: #666666;
+}
+.dark[data-skin="mono"] {
+  --primary: #cccccc;
+  --primary-foreground: #ffffff;
+  --accent: #cccccc;
+  --accent-foreground: #cccccc;
+  --ring: #cccccc;
+}
+:root[data-skin="slate"] {
+  --primary: #475569;
+  --primary-foreground: #ffffff;
+  --accent: #475569;
+  --accent-foreground: #334155;
+  --ring: #475569;
+}
+.dark[data-skin="slate"] {
+  --primary: #94a3b8;
+  --primary-foreground: #ffffff;
+  --accent: #94a3b8;
+  --accent-foreground: #94a3b8;
+  --ring: #94a3b8;
+}
+:root[data-skin="poseidon"] {
+  --primary: #0369a1;
+  --primary-foreground: #ffffff;
+  --accent: #0369a1;
+  --accent-foreground: #025080;
+  --ring: #0369a1;
+}
+.dark[data-skin="poseidon"] {
+  --primary: #0ea5e9;
+  --primary-foreground: #ffffff;
+  --accent: #0ea5e9;
+  --accent-foreground: #0ea5e9;
+  --ring: #0ea5e9;
+}
+:root[data-skin="sisyphus"] {
+  --primary: #7c3aed;
+  --primary-foreground: #ffffff;
+  --accent: #7c3aed;
+  --accent-foreground: #6d28d9;
+  --ring: #7c3aed;
+}
+.dark[data-skin="sisyphus"] {
+  --primary: #a78bfa;
+  --primary-foreground: #ffffff;
+  --accent: #a78bfa;
+  --accent-foreground: #a78bfa;
+  --ring: #a78bfa;
+}
+:root[data-skin="charizard"] {
+  --primary: #ea580c;
+  --primary-foreground: #ffffff;
+  --accent: #ea580c;
+  --accent-foreground: #c2410c;
+  --ring: #ea580c;
+}
+.dark[data-skin="charizard"] {
+  --primary: #fb923c;
+  --primary-foreground: #ffffff;
+  --accent: #fb923c;
+  --accent-foreground: #fb923c;
+  --ring: #fb923c;
+}
+:root[data-skin="sienna"] {
+  --background: #faf9f5;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --border: #e7e4db;
+  --secondary: #ece9df;
+  --primary: #d97757;
+  --primary-foreground: #ffffff;
+  --accent: #d97757;
+}
+.dark[data-skin="sienna"] {
+  --background: #1f1e1c;
+  --card: #2c2b28;
+  --popover: #2c2b28;
+  --border: #3a3935;
+  --secondary: #34322e;
+  --primary: #e0896d;
+  --primary-foreground: #ffffff;
+  --accent: #e0896d;
+}
+:root[data-skin="catppuccin"] {
+  --background: #eff1f5;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --border: #ccd0da;
+  --secondary: #e6e9ef;
+  --primary: #8839ef;
+  --primary-foreground: #ffffff;
+  --accent: #8839ef;
+}
+.dark[data-skin="catppuccin"] {
+  --background: #1e1e2e;
+  --card: #313244;
+  --popover: #313244;
+  --border: #45475a;
+  --secondary: #313244;
+  --primary: #cba6f7;
+  --primary-foreground: #ffffff;
+  --accent: #cba6f7;
+}
+:root[data-skin="nous"] {
+  --background: #ffffff;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --border: #d0d8e0;
+  --secondary: #f0f2f5;
+  --primary: #4682b4;
+  --primary-foreground: #ffffff;
+  --accent: #4682b4;
+}
+.dark[data-skin="nous"] {
+  --background: #0a0e14;
+  --card: #111820;
+  --popover: #111820;
+  --border: #1e2a3a;
+  --secondary: #111820;
+  --primary: #4682b4;
+  --primary-foreground: #ffffff;
+  --accent: #4682b4;
+}
+:root[data-skin="geist-contrast"] {
+  --background: #ffffff;
+  --card: #ffffff;
+  --popover: #ffffff;
+  --border: #eaeaea;
+  --secondary: #fafafa;
+  --primary: #0070f3;
+  --primary-foreground: #ffffff;
+  --accent: #0070f3;
+}
+.dark[data-skin="geist-contrast"] {
+  --background: #000000;
+  --card: #0a0a0a;
+  --popover: #0a0a0a;
+  --border: #262626;
+  --secondary: #111111;
+  --primary: #fff175;
+  --primary-foreground: #0a0908;
+  --accent: #fff175;
+}
+/* Zeus is dark-only (THEMES.md): light mode falls back to the default palette. */
+.dark[data-skin="zeus"] {
+  --background: #0f0f0f;
+  --card: #181818;
+  --popover: #181818;
+  --border: #2a2a1e;
+  --secondary: #181818;
+  --primary: #ffd700;
+  --primary-foreground: #0a0908;
+  --accent: #ffd700;
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
