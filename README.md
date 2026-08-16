@@ -595,6 +595,33 @@ Production data and real cron jobs are never touched. Current snapshot:
 
 ---
 
+## Frontend development
+
+The new frontend lives in `frontend/` (React + Vite + TypeScript + Tailwind +
+shadcn/ui) and talks to the same Python HTTP API. Start the backend first, then
+run Vite with its dev proxy:
+
+```bash
+python3 bootstrap.py            # backend on 127.0.0.1:8787
+cd frontend
+pnpm install
+pnpm dev                        # Vite on http://localhost:5173, proxies /api and /static to 127.0.0.1:8787
+```
+
+Other frontend commands (run from `frontend/`):
+
+```bash
+pnpm test       # Vitest unit/component tests
+pnpm e2e        # Playwright end-to-end tests (isolated backend)
+pnpm build      # produces frontend/dist/
+pnpm typecheck  # tsc --noEmit
+```
+
+When `frontend/dist/` exists, the Python server serves it at `/` (with token
+substitution); otherwise it falls back to the legacy `static/` app.
+
+---
+
 ## Architecture
 
 No build step, no framework, no bundler — a Python standard-library HTTP server

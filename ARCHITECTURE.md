@@ -1,11 +1,17 @@
-# Hermes Web UI: Developer and Architecture Guide
+# HermesCN: Developer and Architecture Guide
 
-> This document is the canonical reference for anyone (human or agent) working on the
-> Hermes Web UI. It covers the exact current state of the code, every design decision and
-> quirk discovered during development, and a phased architecture improvement roadmap that
-> runs in parallel with the feature roadmap in ROADMAP.md.
+> This document is the canonical reference for anyone (human or agent) working on
+> HermesCN, a fork of the Hermes Web UI. It covers the exact current state of the
+> code, every design decision and quirk discovered during development, and a phased
+> architecture improvement roadmap that runs in parallel with the feature roadmap
+> in ROADMAP.md.
 >
 > Keep this document updated as architecture changes are made.
+
+> Fork direction (HermesCN): the Python backend is kept as-is and remains the
+> stable core. The frontend is being remade in React + Vite + shadcn/ui in
+> `frontend/`, migrating surface-by-surface off the legacy vanilla-JS `static/`
+> frontend. See Section 5.0 and Phase K for the rules of the remake.
 
 > Current shipped build: `v0.51.792` (July 1, 2026).
 > Automated coverage: ~11,500 tests via `pytest tests/ --collect-only -q`. CI runs on
@@ -30,10 +36,16 @@ saved workspace panel state into `document.documentElement.dataset.workspacePane
 before the main stylesheet loads. Desktop CSS honors that preload marker immediately,
 and `static/boot.js` keeps the dataset synchronized with the runtime panel state machine.
 
-The design philosophy is deliberately minimal. There is no build step, no bundler, no
-frontend framework. The Python server is split into a routing shell (server.py) and
-business logic modules (api/). The frontend is seven vanilla JS modules loaded from static/.
-This makes the code easy to modify from a terminal or by an agent.
+The design philosophy of the original project was deliberately minimal: no build
+step, no bundler, no frontend framework. The Python server is split into a routing
+shell (server.py) and business logic modules (api/). The legacy frontend is vanilla
+JS modules loaded from static/.
+
+HermesCN changes the frontend half of that philosophy: the new frontend in
+`frontend/` is React + Vite + TypeScript + Tailwind + shadcn/ui, with a build step.
+The backend philosophy is unchanged — Python stdlib, no framework, no build step.
+The HTTP API (SSE streaming included) is the contract between the two halves and
+does not change shape for the remake. See Section 5.0.
 
 Hermes-level chrome is intentionally consolidated: the sidebar has no dedicated brand header.
 Instead, the footer exposes a single "Hermes WebUI" launch button that opens one tabbed
@@ -84,6 +96,14 @@ actions. The topbar remains focused on conversation context and the workspace/fi
       login.js             Login page + open-redirect guard
       icons.js             Lucide icon path registry
       sw.js                Service worker: offline shell cache, version-pinned assets
+    frontend/              PRIMARY HermesCN frontend (React + Vite + TS + Tailwind + shadcn/ui).
+                           The Python server serves frontend/dist/ when present; static/
+                           remains only as fallback (terminal panel, slash commands, and the
+                           legacy shell still live there). See Section 5.0 and Phase K.
+      src/api/             Hand-written typed client for the existing HTTP API
+      src/components/      shadcn/ui components
+      src/features/        One directory per migrated surface (chat, sessions, …)
+      vite.config.ts       Dev proxy: /api and /static -> Python server (127.0.0.1:8787)
     tests/
       conftest.py          Isolated test server/state fixtures
       ~1,150 test files    ~11,500 tests collected via pytest (run `pytest --collect-only -q` for exact)
@@ -393,6 +413,89 @@ read_file_content(workspace, rel):
     - Enforces MAX_FILE_BYTES = 200KB size limit
     - Reads as UTF-8 with errors='replace' (binary files show replacement chars)
     - Returns {path, content, size, lines}
+
+---
+
+## 5.0 Frontend Remake (HermesCN) — React + Vite + shadcn/ui
+
+HermesCN is remaking the frontend in React + Vite + TypeScript + Tailwind +
+shadcn/ui while the Python backend stays unchanged. This section is the contract
+for that work; the rest of Section 5 documents the legacy `static/` frontend.
+
+### 5.0.1 Decisions
+
+- **Backend stays Python at the repo root.** The server runs the Hermes agent
+  in-process (api/streaming.py, api/models.py, api/profiles.py import Hermes
+  modules directly). A TypeScript port would have to reimplement that
+  integration over subprocess/IPC and would discard the ~11,500-test Python
+  suite. Not on the table.
+- **Monorepo, no Turborepo.** One repo, two apps: the Python backend at the
+  root and `frontend/` as a sibling. Turborepo orchestrates JS packages; there
+  is exactly one, plus a Python app it cannot touch. Revisit only if more JS
+  packages appear.
+- **Seam: the existing HTTP API.** SSE streaming, auth, onboarding, workspace,
+  panels — all consumed as-is through a hand-written typed client in
+  `frontend/src/api/`, grown per migrated surface. No tRPC (requires a TS
+  backend). No API redesign during the remake; Phase F stays deferred.
+- **Dev:** Vite dev server proxies `/api` and `/static` to the Python server
+  (default http://127.0.0.1:8787). Backend runs unchanged via bootstrap.py.
+- **Prod:** once parity is reached, the Python server serves `frontend/dist/`
+  instead of `static/` (a small change in the static-serving layer, not a
+  backend rewrite). Until then `static/` remains the fallback.
+
+### 5.0.2 Migration rules
+
+1. Surface-by-surface, in this order: login → chat (SSE) → sessions → workspace
+   → panels (cron/skills/memory/profiles/todo/settings) → onboarding → share.
+2. `static/` is frozen: no new features, critical bug fixes only. A surface is
+   deleted from `static/` only when `frontend/` covers it at parity.
+3. Each migrated surface replaces its frontend-coupled pytest tests (the ones
+   asserting CSS classes, DOM structure, or JS behavior in `static/`) with
+   frontend tests in `frontend/` (Vitest + Playwright). Backend API tests stay.
+4. Backend changes are limited to what the frontend strictly needs (e.g.
+   serving `dist/`). The Python test suite must keep passing.
+5. The typed client in `frontend/src/api/` is the only place that talks HTTP.
+   Features import it; they never call fetch directly.
+6. Preserve the behavioral contracts documented in Section 5 (session delete
+   rules, send() session guard, boot never auto-creates a session, approval
+   polling) — they are invariants of the product, not of the implementation.
+
+### 5.0.3 Known costs
+
+- The legacy frontend is ~100K lines of feature-dense vanilla JS (SSE
+  streaming with cancellation/recovery, tool cards, workspace browser,
+  onboarding wizard, i18n with ~10 locales, service worker, themes/skins).
+  Full parity is a multi-week effort; plan per-surface.
+- ~500 test files reference `static/` sources directly. They are replaced per
+  surface, not in one sweep.
+
+### 5.0.4 Status (2026-08-16)
+
+**Migrated to `frontend/` (the Python server now serves `frontend/dist/` when
+present):**
+
+- Auth: login page + route guard (password + OIDC)
+- Chat: SSE streaming, composer (upload, model selector, cancel), approval +
+  clarify, markdown + tool cards, reconnect
+- Sessions: sidebar list, search, CRUD with the §5.6 delete rules
+- Workspace: file tree, preview, editor
+- Panels: Control Center (cron, skills, memory, profiles, todo, settings)
+- Onboarding wizard + OAuth linking
+- Share page (read-only transcript)
+- i18n (en catalog, 429 keys), themes + skins, PWA (manifest + service worker)
+- Prod serving: `api/routes.py` serves `frontend/dist/` (index.html with token
+  substitution, `/assets/*` with correct Content-Type) when present, falling
+  back to `static/` when absent
+
+**Not yet migrated (still served from `static/`):**
+
+- Terminal panel (`static/terminal.js`, xterm)
+- Slash commands (`static/commands.js`)
+- The legacy shell itself (`static/index.html`, boot.js, ui.js, …) — the
+  fallback when `dist/` is absent; `static/` deletion is deferred until the
+  terminal and slash-command surfaces have React equivalents
+
+Frontend status: 478 Vitest tests green; full Python suite green.
 
 ---
 
@@ -854,6 +957,23 @@ For scale beyond single-user casual use.
 4. Stream cleanup background thread: evict STREAMS entries older than 5 minutes
 5. File tree lazy loading: expand-on-click fetches subdirectory contents
 
+### Phase K: Frontend Remake in React + shadcn/ui (HermesCN) -- IN PROGRESS
+
+Replace the legacy `static/` frontend with a React + Vite + TypeScript +
+Tailwind + shadcn/ui app in `frontend/`. The Python backend and the HTTP API
+stay unchanged. Full rules in Section 5.0.
+
+1. Scaffold `frontend/` (Vite + React + TS + Tailwind + shadcn/ui) with the
+   dev proxy to the Python server.
+2. Typed API client in `frontend/src/api/` covering the endpoints each
+   migrated surface uses.
+3. Migrate surface-by-surface: login → chat (SSE) → sessions → workspace →
+   panels → onboarding → share. Delete each `static/` surface at parity.
+4. Replace frontend-coupled pytest tests per surface with Vitest + Playwright
+   tests in `frontend/`.
+5. Serve `frontend/dist/` from the Python server once parity is reached;
+   remove `static/`.
+
 ---
 
 ## 11. How To Add a New API Endpoint
@@ -1211,6 +1331,7 @@ Quick-reference table for prioritizing architecture work. Phases are from Sectio
 | H     | Authentication              | Low      | Medium | nothing        | Pending    |
 | I     | Test Infrastructure         | High     | High   | requires A,D   | Partial(*) |
 | J     | Performance                 | Low      | High   | requires C     | Pending    |
+| K     | Frontend Remake (React + shadcn/ui) | High | High | nothing | MOSTLY COMPLETE (terminal + slash commands pending; see Section 5.0) |
 
 (*) Phase G is partial: structured request logging done in Sprint 1. Full observability
     (health detail, debug/stats endpoint, log rotation) remains.
@@ -1237,11 +1358,23 @@ will be working on this codebase. Read this before touching any file.
 ### Before Making Any Change
 
 1. Read this document (ARCHITECTURE.md) fully. Especially sections 4, 5, and the ADRs.
-2. Inspect the relevant module under `api/` or `static/`; `server.py` is only the routing shell.
+2. Inspect the relevant module under `api/`, `static/`, or `frontend/`; `server.py` is only the routing shell.
 3. Check the Sprint Log (Section 15) to understand what was recently changed.
 4. Run the relevant test slice first to confirm baseline, for example:
    venv/bin/python -m pytest tests/test_regressions.py -q
 5. Check server health: curl -s http://127.0.0.1:8787/health
+
+### Frontend Remake Rules (HermesCN)
+
+- New frontend work goes in `frontend/` only. Do not add features to `static/`.
+- All HTTP access goes through the typed client in `frontend/src/api/`; no
+  direct fetch calls in features.
+- Do not change API behavior for the remake. If a surface genuinely needs a
+  backend change, keep it minimal and update the affected backend tests.
+- Migrate surface-by-surface per Section 5.0.2; delete a `static/` surface
+  only at parity, and replace its frontend-coupled pytest tests with
+  `frontend/` tests in the same change.
+- The Python test suite must keep passing at every step.
 
 ### Making Changes
 
