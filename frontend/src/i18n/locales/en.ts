@@ -469,6 +469,23 @@ export const en = {
   onboarding_notice_finish: "You can reopen Settings later to change any of this.",
   first_token_time: "Time to first token",
 
+  // ── terminal ──
+  terminal_open_title: "Open workspace terminal",
+  terminal_no_workspace_title: "Select a workspace to open terminal",
+  terminal_title: "Terminal",
+  terminal_clear: "Clear",
+  terminal_copy_output: "Copy output",
+  terminal_restart: "Restart",
+  terminal_collapse: "Collapse",
+  terminal_expand: "Expand",
+  terminal_close: "Close",
+  terminal_input_placeholder: "Run a command...",
+  terminal_start_failed: "Terminal start failed: ",
+  terminal_input_failed: "Terminal input failed: ",
+  terminal_copy_failed: "Copy failed: ",
+  terminal_error: "Terminal error",
+  terminal_remote_backend_unsupported: "Embedded terminal is only supported for local terminal backends.",
+
   // ── share ──
   share_session: "Share",
   share_session_tooltip: "Create a public read-only share link",
