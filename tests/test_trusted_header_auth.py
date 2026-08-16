@@ -13,10 +13,8 @@ import pytest
 import api.auth as auth
 import api.routes as routes
 import api.profiles as profiles
-from tests.js_source_extract import extract_function
 
 
-PANELS_JS = (Path(__file__).resolve().parents[1] / "static" / "panels.js").read_text(encoding="utf-8")
 NODE = shutil.which("node")
 
 
@@ -768,34 +766,3 @@ def test_consumers_route_through_auth_owner(monkeypatch):
     routes.handle_post(handler, SimpleNamespace(path="/api/profile/switch", query=""))
     assert calls and calls[0][0] == "ensure"
     assert handler.status == 200
-
-
-def test_sign_out_uses_trusted_logout_url_with_login_fallback():
-    sign_out = extract_function(PANELS_JS, "signOut", prefix="async function")
-
-    assert "const response=await api('/api/auth/logout',{method:'POST',body:'{}'});" in sign_out
-    assert "window.location.href=response.trusted_logout_url||'login';" in sign_out
-    assert NODE is not None
-
-    def run_sign_out(logout_url):
-        script = f"""
-const signOut = (0, eval)("(" + {json.dumps(sign_out)} + ")");
-globalThis.api = async () => ({{trusted_logout_url: {json.dumps(logout_url)}}});
-globalThis.window = {{location: {{href: null}}}};
-globalThis.showToast = () => {{}};
-globalThis.t = (key) => key;
-signOut().then(() => process.stdout.write(JSON.stringify(window.location.href)));
-"""
-        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        result = subprocess.run(
-            [NODE, "-e", script],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            creationflags=creationflags,
-        )
-        assert result.returncode == 0, result.stderr
-        return json.loads(result.stdout)
-
-    assert run_sign_out("https://auth.example.com/logout") == "https://auth.example.com/logout"
-    assert run_sign_out(None) == "login"

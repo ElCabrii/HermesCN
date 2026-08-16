@@ -7,38 +7,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-UI_JS = (ROOT / "static" / "ui.js").read_text(encoding="utf-8")
-COMPACT_UI = re.sub(r"\s+", "", UI_JS)
-
-
-def test_cli_tool_result_diff_snippet_is_not_cut_to_200_chars():
-    """Diff-like CLI tool results should reach the existing tool-card expander."""
-    assert "function _cliToolResultSnippet" in UI_JS
-    assert "function _cliLooksLikePatchDiff" in UI_JS
-    assert r"\*\*\* Begin Patch" in UI_JS
-    assert "diff --git" in UI_JS
-    assert (
-        "if(_cliLooksLikePatchDiff(fullText))return_clipCliToolSnippet(fullText);"
-        in COMPACT_UI
-    )
-    assert "returnString(fullText||'').slice(0,4000);" in COMPACT_UI
-
-
-def test_cli_tool_fallback_promotes_apply_patch_args_to_tool_card_snippet():
-    """A successful apply_patch result may only say 'Success'; keep the patch visible."""
-    assert "function _cliPatchSnippetFromArgs" in UI_JS
-    assert "toolName==='apply_patch'" in COMPACT_UI
-    assert "'old_string'" in UI_JS
-    assert "'new_string'" in UI_JS
-    assert "constpatchSnippet=_cliPatchSnippetFromArgs(name,args);" in COMPACT_UI
-    assert "snippet:_cliToolCardSnippet(resultSnippet,patchSnippet)" in COMPACT_UI
-    assert "is_diff:_cliToolCardHasDiffSnippet(resultSnippet,patchSnippet)" in COMPACT_UI
-
-
-def test_diff_tool_cards_use_show_diff_expander_label():
-    assert "const moreLabel=tc.is_diff?'Show diff':'Show more';" in UI_JS
-    assert "const lessLabel=tc.is_diff?'Hide diff':'Show less';" in UI_JS
-    assert 'data-more-label="${esc(moreLabel)}"' in UI_JS
 
 
 def _function_source(src: str, name: str) -> str:
@@ -95,82 +63,6 @@ def _function_source(src: str, name: str) -> str:
         i += 1
     assert depth == 0, f"{name}() body did not close"
     return src[match.start() : i]
-
-
-def test_rendered_apply_patch_tool_card_html_contains_diff_lines():
-    """Drive the actual snippet helpers and buildToolCard() through Node."""
-    function_names = [
-        "_clipCliToolSnippet",
-        "_cliToolResultText",
-        "_cliLooksLikePatchDiff",
-        "_cliToolResultSnippet",
-        "_prefixedCliDiffLines",
-        "_firstOwnedValue",
-        "_cliPatchSnippetFromArgs",
-        "_cliToolCardSnippet",
-        "_cliToolCardHasDiffSnippet",
-        "_toolArgPreviewValue",
-        "_toolArgPreviewKeyIsHidden",
-        "_formatToolArgPreview",
-        "_toolResultOneLiner",
-        "_toolCardPreviewText",
-        # #3336: buildToolCard now wraps diff snippets via these helpers.
-        "_snippetLooksLikeDiff",
-        "_colorDiffLines",
-        "_worklogDetailsExpandedDefault",
-        # #3544: buildToolCard stamps durable memory/skill-save flags via these.
-        "_tcAction",
-        "_isMemorySave",
-        "_isSkillUpdate",
-        "buildToolCard",
-    ]
-    functions = "\n".join(_function_source(UI_JS, name) for name in function_names)
-    script = textwrap.dedent(
-        f"""
-        function esc(s){{return String(s||'').replace(/[&<>]/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;'}}[c]));}}
-        function li(){{return '';}}
-        function toolIcon(){{return '';}}
-        function _toolDisplayName(tc){{return tc.name||'tool';}}
-        const window={{_worklogDetailsExpandedByDefault:false}};
-        // #3544: const Sets the _isMemorySave/_isSkillUpdate predicates close over
-        // (extracted helpers reference these module-level constants).
-        const _MEMORY_SAVE_ACTIONS=new Set(['add','replace']);
-        const _SKILL_UPDATE_ACTIONS=new Set(['create','patch','edit','write_file']);
-        const document={{
-          createElement(){{return {{className:'', innerHTML:'', setAttribute(){{}}, removeAttribute(){{}}}};}}
-        }};
-        {functions}
-
-        const longPatch = [
-          '*** Begin Patch',
-          '*** Update File: app.py',
-          '@@',
-          '-old',
-          '+new',
-          ...Array.from({{length: 150}}, (_, i) => '+line ' + i),
-          '*** End Patch'
-        ].join('\\n');
-        const resultSnippet = _cliToolResultSnippet(JSON.stringify({{output:'Success'}}));
-        const patchSnippet = _cliPatchSnippetFromArgs('apply_patch', {{patch: longPatch}});
-        const row = buildToolCard({{
-          name: 'apply_patch',
-          snippet: _cliToolCardSnippet(resultSnippet, patchSnippet),
-          is_diff: _cliToolCardHasDiffSnippet(resultSnippet, patchSnippet),
-          args: {{patch: '(shown in diff)'}},
-          done: true
-        }});
-        const errorSnippet = _cliToolCardSnippet('Patch failed: context not found', patchSnippet);
-        process.stdout.write(JSON.stringify({{html: row.innerHTML, errorSnippet}}));
-        """
-    )
-    proc = subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True)
-    payload = json.loads(proc.stdout)
-    html = payload["html"]
-    assert "-old" in html
-    assert "+new" in html
-    assert "Show diff" in html
-    assert "Patch failed: context not found" in payload["errorSnippet"]
-    assert "-old" in payload["errorSnippet"]
 
 
 def _make_state_db(path: Path) -> None:

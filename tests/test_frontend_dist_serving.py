@@ -6,7 +6,8 @@ Contract:
   (__WEBUI_VERSION__, __MAX_UPLOAD_BYTES__, __CSRF_TOKEN_JSON__).
 - GET /assets/* serves hashed build assets from frontend/dist/assets/ with
   the same sandbox + per-file cache + ETag behavior as /static/*.
-- When frontend/dist is absent, the legacy static/ behavior is unchanged.
+- When frontend/dist is absent (and the legacy static/ shell has been
+  retired), GET / returns the 503 shell-unavailable page instead of a 404.
 - /assets/* is auth-exempt like /static/* (assets are referenced by the
   pre-auth login page and the public shell).
 
@@ -162,12 +163,13 @@ def test_dist_asset_path_traversal_blocked(fake_dist):
     assert handler.status == 404
 
 
-def test_legacy_fallback_when_dist_absent(no_dist):
+def test_shell_unavailable_when_dist_absent(no_dist):
+    """With frontend/dist hidden and static/ retired, GET / returns the
+    503 shell-unavailable page (the backend never renders a bare 404)."""
     handler = _get("/")
-    assert handler.status == 200
+    assert handler.status == 503
     body = bytes(handler.body).decode("utf-8")
-    assert "dist-index" not in body
-    assert "pwa-startup" in body  # legacy shell marker
+    assert "Hermes is restarting" in body  # _SHELL_ERROR_HTML marker
 
     missing = _get("/assets/app.js")
     assert missing.status == 404

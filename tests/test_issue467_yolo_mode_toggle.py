@@ -20,37 +20,6 @@ from tests.conftest import requires_agent_modules
 TEST_BASE = f"http://127.0.0.1:{os.environ.get('HERMES_WEBUI_TEST_PORT', '8788')}"
 
 
-def _read_static_file(name: str) -> str:
-    return (pathlib.Path(__file__).resolve().parents[1] / "static" / name).read_text(
-        encoding="utf-8"
-    )
-
-
-@pytest.fixture(scope="module")
-def commands_js():
-    return _read_static_file("commands.js")
-
-
-@pytest.fixture(scope="module")
-def messages_js():
-    return _read_static_file("messages.js")
-
-
-@pytest.fixture(scope="module")
-def index_html():
-    return _read_static_file("index.html")
-
-
-@pytest.fixture(scope="module")
-def style_css():
-    return _read_static_file("style.css")
-
-
-@pytest.fixture(scope="module")
-def i18n_js():
-    return _read_static_file("i18n.js")
-
-
 def _get(path, expect_ok=True):
     import urllib.request, urllib.error
     try:
@@ -160,79 +129,12 @@ class TestYoloEndpointPost:
 
 # ── Frontend JS tests (static file analysis — no server needed) ──
 
-class TestYoloCommandRegistration:
-    """/yolo slash command should be registered in commands.js."""
-
-    def test_yolo_command_in_array(self, commands_js):
-        assert "'yolo'" in commands_js or '"yolo"' in commands_js
-
-    def test_yolo_uses_cmdYolo(self, commands_js):
-        assert "cmdYolo" in commands_js
-
-    def test_cmdYolo_function_exists(self, commands_js):
-        assert re.search(r"function\s+cmdYolo\s*\(", commands_js)
-
-    def test_cmdYolo_calls_yolo_endpoint(self, commands_js):
-        assert "/api/session/yolo" in commands_js
 
 
-class TestYoloBusySendPath:
-    """/yolo should be recognized by the busy-send command intercept."""
-
-    def test_yolo_in_busy_send_allowlist(self, messages_js):
-        send_idx = messages_js.find("async function send(")
-        assert send_idx >= 0, "send() not found in messages.js"
-        busy_start = messages_js.find("S.busy||compressionRunning", send_idx)
-        assert busy_start >= 0, "busy block not found in send()"
-        intercept_start = messages_js.find("if(text.startsWith('/')", busy_start)
-        assert intercept_start >= 0, "busy slash intercept block not found in send()"
-        intercept_idx = messages_js.find("'steer','interrupt','queue','terminal','goal','yolo'", intercept_start)
-        busymode_idx = messages_js.find("_defaultMessageMode||'steer'", busy_start)
-        assert intercept_idx >= 0, "Busy-path slash allowlist must include yolo in the mid-turn branch"
-        assert intercept_idx < busymode_idx, "Busy-path intercept must run before busyMode routing"
-
-        intercept_block = messages_js[intercept_idx:busymode_idx]
-        assert "_bc.fn(_pc.args)" in intercept_block, (
-            "Busy-path slash intercept should dispatch directly through the command handler"
-        )
-        assert "await _bc.fn" in intercept_block, (
-            "Busy-path slash intercept should await the command handler"
-        )
-        clear_idx = intercept_block.find("$('msg').value=''")
-        await_idx = intercept_block.find("await _bc.fn")
-        assert clear_idx >= 0, "Busy-path intercept should clear composer text before await"
-        assert clear_idx < await_idx, "Composer clear must happen before awaiting the handler"
 
 
-class TestYoloPillHTML:
-    """YOLO pill element should exist in index.html."""
-
-    def test_yolo_pill_element_exists(self, index_html):
-        assert 'id="yoloPill"' in index_html
-
-    def test_yolo_pill_has_onclick(self, index_html):
-        assert 'onclick="cmdYolo()"' in index_html
-
-    def test_yolo_pill_hidden_by_default(self, index_html):
-        pill_match = re.search(r'<button[^>]*id="yoloPill"[^>]*>', index_html)
-        assert pill_match
-        assert "display:none" in pill_match.group(0)
-
-    def test_skip_all_button_exists(self, index_html):
-        assert 'id="approvalSkipAll"' in index_html
 
 
-class TestYoloCSS:
-    """YOLO-related CSS classes should exist."""
-
-    def test_yolo_pill_class(self, style_css):
-        assert ".yolo-pill{" in style_css or ".yolo-pill {" in style_css
-
-    def test_yolo_pill_uses_amber(self, style_css):
-        assert "#f59e0b" in style_css
-
-    def test_approval_skip_all_class(self, style_css):
-        assert ".approval-btn.yolo{" in style_css or ".approval-btn.yolo {" in style_css
 
 
 class TestYoloI18n:
@@ -250,18 +152,3 @@ class TestYoloI18n:
     ]
 
     LOCALES = ["en", "ru", "es", "de", "zh", "ko"]
-
-    @pytest.mark.parametrize("locale", LOCALES)
-    def test_locale_has_all_yolo_keys(self, i18n_js, locale):
-        pattern = rf"\s{locale}:\s*\{{"
-        match = re.search(pattern, i18n_js)
-        assert match, f"Locale '{locale}' not found in i18n.js"
-        start = match.end()
-        next_locale = re.search(r"\n  \w{2}:\s*\{", i18n_js[start:])
-        if next_locale:
-            block = i18n_js[start:start + next_locale.start()]
-        else:
-            block = i18n_js[start:]
-
-        for key in self.REQUIRED_KEYS:
-            assert key in block, f"Key '{key}' missing in locale '{locale}'"

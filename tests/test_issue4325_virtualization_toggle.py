@@ -17,11 +17,6 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-INDEX = REPO_ROOT / "static" / "index.html"
-PANELS = REPO_ROOT / "static" / "panels.js"
-BOOT = REPO_ROOT / "static" / "boot.js"
-UI = REPO_ROOT / "static" / "ui.js"
-I18N = REPO_ROOT / "static" / "i18n.js"
 CONFIG = REPO_ROOT / "api" / "config.py"
 
 
@@ -33,51 +28,6 @@ def test_virtualize_transcript_setting_is_default_off_and_allowed():
     assert '"virtualize_transcript",' in src, "must be in _SETTINGS_BOOL_KEYS"
     assert '"virtualize_transcript_optin": False' in src, "opt-in migration marker must exist + default False"
     assert '"virtualize_transcript_optin",' in src, "opt-in marker must be in _SETTINGS_BOOL_KEYS"
-
-
-def test_settings_preferences_expose_virtualize_toggle_experimental():
-    html = INDEX.read_text(encoding="utf-8")
-    assert 'id="settingsVirtualizeTranscript"' in html
-    assert 'data-i18n="settings_label_virtualize_transcript"' in html
-    assert 'data-i18n="settings_desc_virtualize_transcript"' in html
-    # #4343: checkbox must NOT render checked by default (opt-in, default off).
-    cb_line = next(l for l in html.splitlines() if 'id="settingsVirtualizeTranscript"' in l)
-    assert "checked" not in cb_line, "opt-in toggle must not be pre-checked"
-
-
-def test_boot_applies_saved_virtualize_preference_default_off():
-    js = BOOT.read_text(encoding="utf-8")
-    # #4343 default-off semantics: ===true (only an explicit true enables it).
-    assert "window._virtualizeTranscript=s.virtualize_transcript===true" in js
-    # Settings-load-failed fallback also defaults OFF.
-    assert "window._virtualizeTranscript=false" in js
-
-
-def test_ui_gate_forces_full_render_when_disabled():
-    js = UI.read_text(encoding="utf-8")
-    start = js.index("function _currentMessageVirtualWindow(")
-    body = js[start:start + 900]
-    assert "_virtualizeTranscript===false" in body
-    assert "virtualized:false" in body
-
-
-def test_panels_round_trip_and_hot_apply_virtualize_toggle():
-    js = PANELS.read_text(encoding="utf-8")
-    assert "const virtualizeTranscriptCb=$('settingsVirtualizeTranscript');" in js
-    assert "payload.virtualize_transcript=virtualizeTranscriptCb.checked;" in js
-    # #4343: enabling records the explicit post-flip opt-in marker.
-    assert "payload.virtualize_transcript_optin=virtualizeTranscriptCb.checked;" in js
-    # #4343: checkbox load honors only an explicit opt-in (===true), not !==false.
-    assert "virtualizeTranscriptCb.checked=settings.virtualize_transcript===true;" in js
-    assert "window._virtualizeTranscript=virtualizeTranscriptCb.checked;" in js
-    # Hot-apply: toggling re-renders the open transcript immediately.
-    assert "renderMessages({preserveScroll:true})" in js
-
-
-def test_virtualize_toggle_i18n_all_locales():
-    js = I18N.read_text(encoding="utf-8")
-    assert js.count("settings_label_virtualize_transcript:") == 15
-    assert js.count("settings_desc_virtualize_transcript:") == 15
 
 
 # ── #4343 force-off-for-everyone migration (load_settings behavior) ──────────

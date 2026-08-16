@@ -1005,7 +1005,6 @@ def test_account_usage_profile_cache_invalidates_with_credential_pool_cache(monk
     ]
 
 
-
 def test_account_usage_profile_fetch_caches_unavailable_snapshots(monkeypatch, tmp_path):
     """Known unavailable account snapshots should be cached like available ones."""
     import api.providers as providers
@@ -1178,7 +1177,6 @@ def test_openai_api_key_detection_still_accepts_real_api_keys(monkeypatch, tmp_p
         _restore_config(old_cfg, old_mtime)
 
 
-
 def test_openai_api_key_detection_falls_through_after_codex_jwt_config_value(monkeypatch, tmp_path):
     """A filtered OpenAI config value should not mask a later real API key source."""
     monkeypatch.setattr(profiles, "get_active_hermes_home", lambda: tmp_path)
@@ -1213,103 +1211,6 @@ def test_provider_quota_route_is_registered():
     assert 'parsed.path == "/api/provider/quota"' in routes
     assert 'query.get("refresh", [""])' in routes
     assert "get_provider_quota(provider_id, refresh=refresh)" in routes
-
-
-def test_provider_quota_card_is_rendered_in_providers_panel():
-    """The Providers panel should show active provider quota/status before cards."""
-    panels = (ROOT / "static" / "panels.js").read_text(encoding="utf-8")
-    assert "_fetchProviderQuotaStatus(false)" in panels
-    assert "'/api/provider/quota'" in panels
-    assert "function _buildProviderQuotaCard" in panels
-    assert "provider_quota_title" in panels
-    assert "provider-quota-card" in panels
-    assert "account_limits" in panels
-    assert "remaining_percent" in panels
-    assert "provider-quota-details" in panels
-    assert "provider_quota_credential_pool" in panels
-    assert "provider-quota-pool-row" in panels
-    assert "_buildProviderQuotaPoolBreakdown" in panels
-    assert "_providerQuotaPoolShouldDefaultOpen" in panels
-    assert "hermes-provider-quota-pool-open" in panels
-    assert "provider-quota-pool-chevron" in panels
-    assert 'aria-hidden="true"' in panels
-    assert "count>0&&count<=3" in panels
-    assert "status.status==='available'||accountLimits.pool" in panels
-    assert "provider-quota-window-detail" in panels
-    assert "provider_quota_session_limit" in panels
-    assert "provider_quota_weekly_limit" in panels
-    assert "_providerQuotaUnavailableReason" in panels
-    assert "provider_quota_retry_after" in panels
-    assert "accountLimits.details)&&!accountLimits.pool" in panels
-
-
-def test_provider_quota_card_has_manual_refresh_control():
-    """The quota card should let users force an immediate fresh usage lookup."""
-    panels = (ROOT / "static" / "panels.js").read_text(encoding="utf-8")
-    assert "function _refreshProviderQuota" in panels
-    assert "function _fetchProviderQuotaStatus" in panels
-    assert "refresh=1" in panels
-    assert "cache:'no-store'" in panels
-    assert "data-provider-quota-refresh" in panels
-    assert "provider_quota_refresh_usage" in panels
-    assert "provider_quota_refresh_succeeded" in panels
-    assert "provider_quota_refresh_failed" in panels
-    assert "card.isConnected&&button" in panels
-    assert "provider_quota_last_checked" in panels
-
-
-def test_provider_quota_i18n_keys_exist_for_all_locales():
-    """Provider quota UI keys must be present in every locale block."""
-    i18n = (ROOT / "static" / "i18n.js").read_text(encoding="utf-8")
-    locale_count = len(
-        re.findall(r"^  (?:[A-Za-z_][A-Za-z0-9_]*|'[^']+'):\s*\{", i18n, re.MULTILINE)
-    )
-    keys = sorted(set(re.findall(r"provider_quota_[a-z0-9_]+", (ROOT / "static" / "panels.js").read_text(encoding="utf-8"))))
-    assert locale_count >= 1
-    assert "provider_quota_retry_after" in keys
-    for key in keys:
-        assert len(re.findall(rf"^\s+{re.escape(key)}:", i18n, re.MULTILINE)) == locale_count, key
-
-
-def test_settings_label_and_description_i18n_keys_exist_for_all_locales():
-    """Settings labels/descriptions referenced by the page need every locale."""
-    i18n = (ROOT / "static" / "i18n.js").read_text(encoding="utf-8")
-    index_html = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-    locale_count = len(
-        re.findall(r"^  (?:[A-Za-z_][A-Za-z0-9_]*|'[^']+'):\s*\{", i18n, re.MULTILINE)
-    )
-    keys = sorted(
-        set(re.findall(r'data-i18n="(settings_(?:label|desc)_[a-z0-9_]+)"', index_html))
-    )
-    assert locale_count >= 1
-    assert "settings_label_fade_text_effect" in keys
-    assert "settings_desc_fade_text_effect" in keys
-    for key in keys:
-        assert len(re.findall(rf"^\s+{re.escape(key)}:", i18n, re.MULTILINE)) == locale_count, key
-
-
-def test_provider_quota_styles_exist():
-    """Quota UI should have visible supported/unavailable/invalid states."""
-    css = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
-    for token in (
-        ".provider-quota-card",
-        ".provider-quota-metric",
-        ".provider-quota-card-available",
-        ".provider-quota-card-no_key",
-        ".provider-quota-card-invalid_key",
-        ".provider-quota-details",
-        ".provider-quota-window",
-        ".provider-quota-actions",
-        ".provider-quota-refresh",
-        ".provider-quota-checked",
-        ".provider-quota-pool",
-        ".provider-quota-pool-chevron",
-        ".provider-quota-pool[open] .provider-quota-pool-chevron",
-        ".provider-quota-pool-row",
-        ".provider-quota-pool-window",
-        ".provider-quota-window-detail",
-    ):
-        assert token in css
 
 
 # ── Regression tests for #1912 ────────────────────────────────────────────────

@@ -72,29 +72,6 @@ _RAW_STRING_FIXTURE_HTML = """\
 </body></html>"""
 
 
-def test_layout_sane_on_master_pages():
-    """Clean-master assertion: the real app has zero violations in the safe scope."""
-    sp = _require_playwright()
-    from tests._pytest_port import BASE
-
-    # degenerate excluded: the composer has two intentional off-screen a11y
-    # proxies (fileInput, modelSelect) that are not layout bugs
-    _LIVE_CHECKS = ["overlap", "clip", "container-escape", "raw-string"]
-
-    with sp() as pw:
-        browser = pw.chromium.launch(headless=True, args=_BROWSER_ARGS)
-        try:
-            for path in ["/", "/#settings", "/#sessions"]:
-                ctx = browser.new_context(viewport={"width": 1280, "height": 720})
-                page = ctx.new_page()
-                page.goto(BASE + path, wait_until="domcontentloaded")
-                page.wait_for_selector("#msg, .app, body", timeout=10000)
-                assert_layout_sane(page, scope_selector=".layout > main", checks=_LIVE_CHECKS)
-                ctx.close()
-        finally:
-            browser.close()
-
-
 def test_default_scope_vs_full_body():
     """Scoping to main.main excludes collapsed rightpanel noise; body scope catches it."""
     sp = _require_playwright()

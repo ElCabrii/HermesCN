@@ -18,8 +18,6 @@ import re
 import subprocess
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
-UI_JS_PATH = REPO_ROOT / "static" / "ui.js"
-UI_JS = UI_JS_PATH.read_text(encoding="utf-8")
 
 
 # ── helpers: Python mirror of the relevant renderMd() segment ────────────────
@@ -102,49 +100,6 @@ def strip_tags(html):
 
 
 # ── Source-level checks ───────────────────────────────────────────────────────
-
-class TestAlStashSourceFix:
-
-    def test_al_stash_includes_pre_pattern(self):
-        """_al_stash regex must stash <pre>…</pre> blocks to protect code from autolink."""
-        al_stash_idx = UI_JS.index('const _al_stash=[]')
-        al_stash_block = UI_JS[al_stash_idx : al_stash_idx + 300]
-        assert '<pre\\b' in al_stash_block, (
-            "_al_stash replacement must include an attribute-tolerant <pre\\b[^>]*> "
-            "pattern so code blocks are protected from the outer autolink scanner"
-        )
-
-    def test_al_stash_pre_regex_uses_lazy_dotall(self):
-        """_al_stash must use [\\s\\S]*? (lazy dotall) for the <pre> branch."""
-        al_stash_idx = UI_JS.index('const _al_stash=[]')
-        al_stash_block = UI_JS[al_stash_idx : al_stash_idx + 300]
-        # The pattern <pre>[\s\S]*?<\/pre> must appear in the stash line
-        assert r'[\s\S]*?' in al_stash_block, (
-            "_al_stash <pre> branch must use [\\s\\S]*? for multi-line matching"
-        )
-        assert r'<\/pre>' in al_stash_block or '</pre>' in al_stash_block, (
-            "_al_stash must close the <pre> branch with </pre>"
-        )
-
-    def test_al_stash_still_covers_a_and_img(self):
-        """_al_stash must continue to stash <a> and <img> (regression guard for #487b)."""
-        al_stash_idx = UI_JS.index('const _al_stash=[]')
-        al_stash_block = UI_JS[al_stash_idx : al_stash_idx + 300]
-        assert '<a\\b' in al_stash_block or '<a\\\\b' in al_stash_block, (
-            "_al_stash must still stash <a> tags"
-        )
-        assert '<img\\b' in al_stash_block or '<img\\\\b' in al_stash_block, (
-            "_al_stash must still stash <img> tags"
-        )
-
-    def test_js_syntax_valid(self):
-        """ui.js must pass node --check after the fix."""
-        result = subprocess.run(
-            ['node', '--check', str(UI_JS_PATH)],
-            capture_output=True, text=True,
-        )
-        assert result.returncode == 0, f"node --check failed:\n{result.stderr}"
-
 
 # ── Behaviour: code blocks with quoted URLs ───────────────────────────────────
 

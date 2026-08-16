@@ -20,7 +20,6 @@ import re
 
 REPO = pathlib.Path(__file__).parent.parent
 STREAMING = (REPO / "api" / "streaming.py").read_text(encoding="utf-8")
-MESSAGES = (REPO / "static" / "messages.js").read_text(encoding="utf-8")
 
 
 def _on_reasoning_body() -> str:
@@ -115,14 +114,4 @@ def test_reasoning_buffer_flushed_at_every_boundary():
     )
     assert STREAMING.count("_flush_reasoning_buffer()") >= 5, (
         "expected flush at on_token, on_reasoning(None), on_tool, post-run, and the finally"
-    )
-
-
-
-def test_frontend_appends_reasoning_deltas():
-    # The whole coalesce requirement hinges on the frontend APPENDING (not replacing).
-    # If this ever changes to assignment, the throttle design must change with it.
-    assert "reasoningText += text" in MESSAGES, (
-        "frontend reasoning handler must append deltas — if this changes, revisit the "
-        "server-side coalescing throttle (#4729)"
     )

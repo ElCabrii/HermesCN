@@ -12,9 +12,6 @@ import re
 import unittest
 
 REPO_ROOT = pathlib.Path(__file__).parent.parent
-CSS = (REPO_ROOT / "static" / "style.css").read_text(encoding="utf-8")
-HTML = (REPO_ROOT / "static" / "index.html").read_text(encoding="utf-8")
-MESSAGES_JS = (REPO_ROOT / "static" / "messages.js").read_text(encoding="utf-8")
 STREAMING_PY = (REPO_ROOT / "api" / "streaming.py").read_text(encoding="utf-8")
 
 
@@ -53,8 +50,6 @@ class TestTitleAutoGenerationCondition(unittest.TestCase):
         parts = re.split(r'\bor\b', cond)
         self.assertGreaterEqual(len(parts), 3,
             "Expected at least 3 OR-joined sub-conditions (Untitled, New Chat, not s.title)")
-
-
 
 
 class TestIssue495TitleStreaming(unittest.TestCase):
@@ -114,42 +109,6 @@ class TestIssue495TitleStreaming(unittest.TestCase):
             "background title path should end the SSE stream with stream_end",
         )
 
-    def test_frontend_listens_for_title_event(self):
-        self.assertIn(
-            "addEventListener('title'",
-            MESSAGES_JS,
-            "messages.js should listen for title SSE events",
-        )
-
-    def test_frontend_listens_for_title_status_event(self):
-        self.assertIn(
-            "addEventListener('title_status'",
-            MESSAGES_JS,
-            "messages.js should listen for title_status SSE events",
-        )
-        self.assertIn(
-            "console.info('[title]'",
-            MESSAGES_JS,
-            "messages.js should log title generation diagnostics to the browser console",
-        )
-
-    def test_frontend_refreshes_title_ui_after_title_event(self):
-        self.assertIn(
-            "syncTopbar()",
-            MESSAGES_JS,
-            "messages.js title listener should sync top bar title",
-        )
-        self.assertTrue(
-            ("renderSessionListFromCache()" in MESSAGES_JS) or ("renderSessionList()" in MESSAGES_JS),
-            "messages.js title listener should refresh session list UI",
-        )
-
-    def test_frontend_waits_for_stream_end_before_closing(self):
-        self.assertIn(
-            "addEventListener('stream_end'",
-            MESSAGES_JS,
-            "messages.js should close SSE connection on stream_end (not immediately on done)",
-        )
 
     def test_title_snippet_uses_visible_assistant_reply_after_tools(self):
         """Tool-heavy opening turns should use the final visible assistant reply."""

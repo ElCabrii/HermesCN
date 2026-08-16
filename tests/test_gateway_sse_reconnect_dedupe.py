@@ -5,7 +5,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SESSIONS_JS = ROOT / "static" / "sessions.js"
 GATEWAY_WATCHER = ROOT / "api" / "gateway_watcher.py"
 
 
@@ -28,44 +27,6 @@ def test_gateway_watcher_remains_hash_only():
     assert "_detect_gateway_restart" not in src
     assert "current_hash = _snapshot_hash(sessions)" in poll_once
     assert "if current_hash != self._last_hash:" in poll_once
-
-
-def test_gateway_sse_dedupes_reconnect_snapshot_before_refresh():
-    """Reconnect initial snapshots should not force a sidebar refetch."""
-    src = _read(SESSIONS_JS)
-    handler = _block(
-        src,
-        "_gatewaySSE.addEventListener('sessions_changed'",
-        "_gatewaySSE.onerror",
-    )
-
-    assert "function _gatewaySessionSnapshotKey" in src
-    assert "function _isDuplicateGatewaySessionSnapshot" in src
-    assert "if(!_isDuplicateGatewaySessionSnapshot(data.sessions))" in handler
-    assert "renderSessionList({deferWhileInteracting:true}); // re-fetch and re-render" in handler
-
-
-def test_gateway_probe_reattaches_sse_after_profile_switch_restart():
-    """A healthy probe must revive the EventSource when the watcher restarted."""
-    src = _read(SESSIONS_JS)
-    probe = _block(src, "async function probeGatewaySSEStatus()", "\n\nfunction startGatewaySSE")
-
-    assert "if(!_gatewaySSE && typeof EventSource!=='undefined' && !(document&&document.hidden)) startGatewaySSE();" in probe
-
-
-def test_gateway_snapshot_key_matches_backend_hash_fields():
-    """Frontend dedupe must compare the same fields that drive watcher events."""
-    src = _read(SESSIONS_JS)
-    key_fn = _block(
-        src,
-        "function _gatewaySessionSnapshotKey",
-        "\n\nfunction _isGatewaySessionForSnapshot",
-    )
-
-    assert "s.session_id" in key_fn
-    assert "s.updated_at||0" in key_fn
-    assert "s.message_count||0" in key_fn
-    assert ".sort()" in key_fn
 
 
 def test_gateway_snapshot_dedupe_logic_filters_symmetrically():
@@ -123,16 +84,3 @@ globalThis._allSessions = [{session_id:'web-1', updated_at:1, message_count:1, s
 if(!_isDuplicateGatewaySessionSnapshot([null, {session_id:'web-2', session_source:'webui'}])) throw new Error('expected empty gateway snapshot duplicate');
 """
     subprocess.run(["node", "-e", script], check=True)
-
-
-def test_load_session_persists_only_after_metadata_loads():
-    """Do not overwrite the last good localStorage sid before /api/session succeeds."""
-    src = _read(SESSIONS_JS)
-    # _mergePendingSessionMessage was lifted to a top-level helper for #6419,
-    # so use a stable boundary inside loadSession instead.
-    load = _block(src, "async function loadSession(sid)", "// Phase 2a:")
-    api_pos = load.index("data = await api(`/api/session")
-    persist_pos = load.index("localStorage.setItem('hermes-webui-session',S.session.session_id)")
-
-    assert "_persistActiveSession" not in src
-    assert persist_pos > api_pos

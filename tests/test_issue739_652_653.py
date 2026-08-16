@@ -11,10 +11,8 @@ import re
 import pathlib
 
 STREAMING = pathlib.Path(__file__).parent.parent / 'api' / 'streaming.py'
-MESSAGES_JS = pathlib.Path(__file__).parent.parent / 'static' / 'messages.js'
 
 streaming_src = STREAMING.read_text(encoding='utf-8')
-messages_js_src = MESSAGES_JS.read_text(encoding='utf-8')
 
 
 # ── #739: Quota exhaustion detection ─────────────────────────────────────────
@@ -48,11 +46,6 @@ class TestQuotaDetection:
         """Rate-limit detection must be guarded so quota errors don't also match."""
         # The pattern: _exc_is_rate_limit = (not _exc_is_quota) and (...)
         assert '(not _exc_is_quota)' in streaming_src
-
-    def test_js_quota_label_present(self):
-        """messages.js renders a 'quota_exhausted' apperror with a distinct label."""
-        assert "quota_exhausted" in messages_js_src
-        assert "Out of credits" in messages_js_src
 
 
 # ── #739: Error persistence across reload ─────────────────────────────────────

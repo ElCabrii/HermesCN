@@ -12,8 +12,6 @@ from tests._pytest_port import BASE, TEST_STATE_DIR
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ROUTES_PY = (ROOT / "api" / "routes.py").read_text(encoding="utf-8")
-SESSIONS_JS = (ROOT / "static" / "sessions.js").read_text(encoding="utf-8")
-STYLE_CSS = (ROOT / "static" / "style.css").read_text(encoding="utf-8")
 
 
 def post(path, body=None):
@@ -41,7 +39,6 @@ def make_session(created):
     sid = d["session"]["session_id"]
     created.append(sid)
     return sid
-
 
 
 def inject_hidden_pinned_snapshot(sid="hidden-pinned-snapshot"):
@@ -160,36 +157,3 @@ def test_hidden_in_memory_snapshot_does_not_count_toward_pin_quota():
         pre_compression_snapshot=True,
     )
     assert _session_counts_toward_pin_quota(snapshot) is False
-
-
-def test_session_pin_cap_has_backend_and_frontend_guards():
-    # #3288 renamed the in-LOCK pin counter to count visible lineages
-    # (pinned_lineage_ids) instead of raw session ids (pinned_ids), so a
-    # continuation lineage no longer consumes multiple pin slots. The guard
-    # behaviour (snapshot, merge under LOCK, compare against the limit, 400) is
-    # unchanged.
-    assert 'persisted_rows = [' in ROUTES_PY
-    assert 'candidate_rows.extend(' in ROUTES_PY
-    assert 'pinned_lineage_ids = _visible_pinned_lineage_ids(candidate_rows)' in ROUTES_PY
-    assert 'pinned_sessions_limit = int(load_settings().get("pinned_sessions_limit", 3) or 3)' in ROUTES_PY
-    assert 'if len(pinned_lineage_ids) >= pinned_sessions_limit:' in ROUTES_PY
-    assert 'Up to {pinned_sessions_limit} sessions can be pinned' in ROUTES_PY
-
-    assert 'function _pinnedSessionCount()' in SESSIONS_JS
-    assert 'function _getPinnedSessionsLimit()' in SESSIONS_JS
-    assert 'function _pinnedSessionsLimit()' not in SESSIONS_JS
-    assert 'const pinLimitReached=!session.pinned&&_pinnedSessionCount()>=_getPinnedSessionsLimit();' not in SESSIONS_JS
-    assert 'if(pinLimitReached)' not in SESSIONS_JS
-    assert "await api('/api/session/pin'" in SESSIONS_JS
-    assert 'Only ${limit} conversations can be pinned' in SESSIONS_JS
-    assert ".session-action-opt.is-disabled{opacity:.55;cursor:not-allowed;}" in STYLE_CSS
-
-
-def test_session_rows_open_action_menu_from_right_click():
-    assert 'el.oncontextmenu=(e)=>{' in SESSIONS_JS
-    context_idx = SESSIONS_JS.find('el.oncontextmenu=(e)=>{')
-    assert context_idx != -1
-    block = SESSIONS_JS[context_idx:SESSIONS_JS.find('};', context_idx) + 2]
-    assert 'e.preventDefault();' in block
-    assert 'e.stopPropagation();' in block
-    assert '_openSessionActionMenu(s, actions||el);' in block

@@ -9,8 +9,6 @@ from types import SimpleNamespace
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-COMMANDS_JS = (REPO_ROOT / "static" / "commands.js").read_text(encoding="utf-8")
-MESSAGES_JS = (REPO_ROOT / "static" / "messages.js").read_text(encoding="utf-8")
 ROUTES_PY = (REPO_ROOT / "api" / "routes.py").read_text(encoding="utf-8")
 STREAMING_PY = (REPO_ROOT / "api" / "streaming.py").read_text(encoding="utf-8")
 
@@ -464,24 +462,3 @@ def test_streaming_goal_hook_emits_evaluating_state_before_judge():
     assert evaluating_idx < judge_idx < done_idx
     assert "Evaluating goal progress…" in STREAMING_PY
     assert "'state': 'continuing' if decision.get('should_continue') else 'idle'" in STREAMING_PY
-
-
-def test_frontend_has_goal_slash_command_and_status_event_handler():
-    assert "{name:'goal'" in COMMANDS_JS
-    assert "subArgs:['status','pause','resume','clear']" in COMMANDS_JS
-    assert "function cmdGoal" in COMMANDS_JS
-    assert "api('/api/goal'" in COMMANDS_JS
-    assert "stream_id" in COMMANDS_JS
-    assert "goal'" in MESSAGES_JS
-    assert "source.addEventListener('goal'" in MESSAGES_JS
-    assert "source.addEventListener('goal_continue'" in MESSAGES_JS
-    assert "['steer','interrupt','queue','terminal','goal','yolo'].includes(_pc.name)" in MESSAGES_JS
-    assert "queueSessionMessage" in MESSAGES_JS
-
-
-def test_frontend_goal_evaluating_state_uses_calm_composer_indicator():
-    assert "const goalState=String(d.state||'').trim();" in MESSAGES_JS
-    assert "t('goal_evaluating_progress')" in MESSAGES_JS
-    assert "if(goalState==='evaluating')" in MESSAGES_JS
-    assert "setComposerStatus(goalEvaluatingMessage);" in MESSAGES_JS
-    assert "return;" in MESSAGES_JS

@@ -14,244 +14,15 @@ from types import SimpleNamespace
 import pytest
 
 ROOT = Path(__file__).parent.parent
-PANELS_JS_PATH = ROOT / "static" / "panels.js"
-PANELS_JS = PANELS_JS_PATH.read_text(encoding="utf-8")
-INDEX_HTML = (ROOT / "static" / "index.html").read_text(encoding="utf-8")
-I18N_JS = (ROOT / "static" / "i18n.js").read_text(encoding="utf-8")
 STREAMING_PY = (ROOT / "api" / "streaming.py").read_text(encoding="utf-8")
 NODE = shutil.which("node")
 
 
-class TestAuxiliaryModelsHTML:
-    """The auxiliary models card must be present in the settings preferences pane."""
-
-    def test_aux_models_container_exists(self):
-        """The #auxModelsContainer div must exist in the preferences pane."""
-        assert 'id="auxModelsContainer"' in INDEX_HTML, (
-            "Missing #auxModelsContainer in index.html — auxiliary models card not rendered"
-        )
-
-    def test_reset_button_exists(self):
-        assert 'id="btnResetAuxModels"' in INDEX_HTML, (
-            "Missing #btnResetAuxModels button in index.html"
-        )
-
-    def test_apply_button_exists(self):
-        assert 'id="btnApplyAuxModels"' in INDEX_HTML, (
-            "Missing #btnApplyAuxModels button in index.html"
-        )
-
-    def test_aux_card_after_default_model(self):
-        """Auxiliary Models card should come after the Default Model card in the DOM."""
-        model_idx = INDEX_HTML.find('id="settingsModel"')
-        aux_idx = INDEX_HTML.find('id="auxModelsContainer"')
-        assert model_idx >= 0, "Default Model select not found in index.html"
-        assert aux_idx >= 0, "Auxiliary Models container not found in index.html"
-        assert aux_idx > model_idx, (
-            "Auxiliary Models container must appear after Default Model in the DOM"
-        )
-
-    def test_i18n_label_on_aux_card(self):
-        """The auxiliary models card label must use data-i18n attribute."""
-        assert 'data-i18n="settings_label_auxiliary_models"' in INDEX_HTML, (
-            "Missing data-i18n='settings_label_auxiliary_models' on auxiliary card label"
-        )
 
 
 class TestAuxiliaryModelsJS:
     """The JS logic for loading and saving auxiliary models must be in panels.js."""
 
-    def test_load_function_exists(self):
-        assert "async function _loadAuxiliaryModels" in PANELS_JS, (
-            "Missing _loadAuxiliaryModels() in panels.js"
-        )
-
-    def test_apply_function_exists(self):
-        assert "async function _applyAuxModels" in PANELS_JS, (
-            "Missing _applyAuxModels() in panels.js"
-        )
-
-    def test_auxiliary_task_metadata_is_normalized(self):
-        """Frontend should keep auxiliary task rows backed by normalized metadata."""
-        assert "let _auxTasks=[]" in PANELS_JS, "Missing _auxTasks cache in panels.js"
-        assert "function _normalizeAuxiliaryTasks" in PANELS_JS, (
-            "Missing _normalizeAuxiliaryTasks() in panels.js"
-        )
-        assert "function _auxTaskLabelFromMeta" in PANELS_JS, (
-            "Missing _auxTaskLabelFromMeta() in panels.js"
-        )
-        assert "_auxTasks=_normalizeAuxiliaryTasks((auxData&&auxData.tasks)||[])" in PANELS_JS, (
-            "Auxiliary load flow must normalize API task payload"
-        )
-        assert "for(const task of _auxTasks)" in PANELS_JS, (
-            "Auxiliary rows should be rendered from normalized API payload"
-        )
-
-    @pytest.mark.skipif(NODE is None, reason="node not on PATH")
-    def test_normalize_auxiliary_tasks_keeps_first_wins_and_unknown_metadata(self):
-        """Normalization should keep first occurrence and preserve unknown metadata."""
-        script = r"""
-const fs = require('fs');
-const src = fs.readFileSync(process.argv[1], 'utf8');
-
-function extract(name){
-  const re = new RegExp('function\\s+' + name + '\\s*\\(');
-  const start = src.search(re);
-  if(start < 0) throw new Error(name + ' not found');
-  let i = src.indexOf('{', start);
-  let depth = 0;
-  while(i < src.length){
-    const ch = src[i];
-    if(ch === '{') depth += 1;
-    else if(ch === '}') {
-      depth -= 1;
-      if(depth === 0){
-        break;
-      }
-    }
-    i += 1;
-  }
-  if(depth !== 0) throw new Error(name + ' parse failed');
-  return src.slice(start, i + 1);
-}
-
-global.t = (key) => {
-  const dict = {
-    settings_aux_task_vision: 'Vision',
-    settings_aux_task_vision_desc: 'image/screenshot analysis',
-  };
-  return Object.prototype.hasOwnProperty.call(dict, key) ? dict[key] : key;
-};
-
-eval(extract('_auxTaskLabelFromMeta'));
-eval(extract('_normalizeAuxiliaryTasks'));
-
-const normalized = _normalizeAuxiliaryTasks([
-  {task: 'vision', provider: 'openai', model: 'gpt-5.5', label: 'Backend Vision', description: 'backend desc'},
-  {task: 'future_task', provider: 'openai', model: 'future-1', label: 'Future Task', description: 'future tool'},
-  {task: 'vision', provider: 'openai', model: 'gpt-5.6'},
-  null,
-  {},
-]);
-
-const vision = normalized.find((entry) => entry.task === 'vision');
-const futureTask = normalized.find((entry) => entry.task === 'future_task');
-
-console.log(JSON.stringify({
-  tasks: normalized.map((entry) => entry.task),
-  visionLabel: vision ? vision.label : null,
-  visionDescription: vision ? vision.description : null,
-  futureLabel: futureTask ? futureTask.label : null,
-  futureDescription: futureTask ? futureTask.description : null,
-}));
-"""
-
-        proc = subprocess.run(
-            [NODE, "-e", script, str(PANELS_JS_PATH)],
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        assert proc.returncode == 0, f"node probe failed:\n{proc.stderr}"
-        result = json.loads(proc.stdout.strip().splitlines()[-1])
-        assert result["tasks"] == ["vision", "future_task"], (
-            "normalize should keep duplicate removal and payload order"
-        )
-        assert result["visionLabel"] == "Vision"
-        assert result["visionDescription"] == "image/screenshot analysis"
-        assert result["futureLabel"] == "Future Task"
-        assert result["futureDescription"] == "future tool"
-
-    def test_no_hardcoded_aux_task_slot_array(self):
-        """Auxiliary rows must not come from a hardcoded task-slot list."""
-        assert "_AUX_TASK_SLOTS" not in PANELS_JS
-        assert "const _AUX_TASK_SLOTS" not in PANELS_JS
-        assert "session_search" not in PANELS_JS
-
-    def test_advanced_options_button_and_modal_wiring(self):
-        """Each auxiliary row and the main model should expose gear-driven advanced config editing."""
-        for marker in (
-            "aux-advanced-btn",
-            "model-advanced-row",
-            "model-advanced-btn",
-            "mainAdvancedBtn",
-            "_bindMainAdvancedOptionsButton",
-            "document.createElement('button')",
-            "row.appendChild(btn)",
-            "_openAuxAdvancedOptions",
-            "_mainAdvancedConfig=null",
-            "btn.disabled=_mainAdvancedConfig===null",
-            "if(_mainAdvancedConfig!==null)",
-            "Object.prototype.hasOwnProperty.call(auxData,'main')",
-            "_mainAdvancedConfig=null;",
-            "auxAdvancedOverlay",
-            "auxAdvancedBaseUrl",
-            "auxAdvancedTimeout",
-            "auxAdvancedDownloadTimeout",
-            "auxAdvancedMaxConcurrency",
-            "auxAdvancedExtraBody",
-            "auxAdvancedApiKey",
-            "api_key_clear",
-            "Object.keys(cfg.extra_body).length",
-        ):
-            assert marker in PANELS_JS
-
-    def test_normalize_auxiliary_tasks_deduplicates_and_rejects_malformed(self):
-        """Frontend normalization should keep only first occurrence and valid payload entries."""
-        assert "if(!rawTask||typeof rawTask!=='object') continue;" in PANELS_JS
-        assert "if(!task||seen.has(task)) continue;" in PANELS_JS
-
-    def test_auxiliary_load_uses_api_payload_order(self):
-        """Row rendering should iterate exactly the normalized API payload order."""
-        idx = PANELS_JS.find("_auxTasks=_normalizeAuxiliaryTasks((auxData&&auxData.tasks)||[])")
-        assert idx >= 0
-        assert "for(const task of _auxTasks)" in PANELS_JS[idx:idx + 380]
-
-    def test_main_advanced_modal_hides_unsupported_timing_fields_but_keeps_request_body(self):
-        """Main-model modal should not advertise timing knobs that the chat agent cannot apply."""
-        open_idx = PANELS_JS.find("function _openAuxAdvancedOptions")
-        assert open_idx >= 0
-        modal_body = PANELS_JS[open_idx:open_idx + 4600]
-        assert "const timingFields=isMain?'':(" in modal_body
-        assert "auxAdvancedExtraBody" in modal_body
-        assert "auxAdvancedBaseUrl" in modal_body
-
-    def test_main_advanced_modal_exposes_service_tier_selector(self):
-        """Main-model advanced modal should expose service-tier control."""
-        open_idx = PANELS_JS.find("function _openAuxAdvancedOptions")
-        assert open_idx >= 0
-        modal_body = PANELS_JS[open_idx:open_idx + 3600]
-        helper_idx = PANELS_JS.find("function _mainModelSupportsServiceTier")
-        assert helper_idx >= 0
-        helper_body = PANELS_JS[helper_idx:helper_idx + 1300]
-        assert "_mainModelSupportsServiceTier" in PANELS_JS
-        assert "selectedOpt.dataset.fast" in helper_body
-        assert "return cfg&&cfg.supports_fast_tier===true" in helper_body
-        assert "return fastSupport==='1'||fastSupport==='true'" in helper_body
-        assert "provider!=='openai'&&provider!=='openai-api'&&provider!=='openai-codex')" in helper_body
-        assert "provider==='openai-codex') return false" not in helper_body
-        assert "auxAdvancedServiceTier" in modal_body
-        assert "isMain&&_mainModelSupportsServiceTier(cfg)" in modal_body
-        assert "settings_main_advanced_service_tier" in modal_body
-        assert "settings_main_advanced_service_tier_default" in modal_body
-        assert "settings_main_advanced_service_tier_priority" in modal_body
-        assert "m.supports_fast_tier" in PANELS_JS
-        assert "opt.dataset.fast='1'" in PANELS_JS
-        assert "opt.dataset.fast='0'" in PANELS_JS
-
-    def test_main_advanced_save_omits_unsupported_timing_keys(self):
-        """Saving main-model options must not send blank timing keys that backend treats as clears."""
-        save_idx = PANELS_JS.find("const advanced={")
-        assert save_idx >= 0
-        save_body = PANELS_JS[save_idx:save_idx + 900]
-        object_literal = save_body[:save_body.find("};") + 2]
-        assert "timeout:" not in object_literal
-        assert "download_timeout:" not in object_literal
-        assert "max_concurrency:" not in object_literal
-        assert "if(!isMain){" in save_body
-        assert "advanced.timeout=$('auxAdvancedTimeout')?.value||''" in save_body
-        assert "advanced.download_timeout=$('auxAdvancedDownloadTimeout')?.value||''" in save_body
-        assert "advanced.max_concurrency=$('auxAdvancedMaxConcurrency')?.value||''" in save_body
 
     def test_main_extra_body_flows_to_agent_request_overrides(self):
         """Persisted main extra_body must be passed to AIAgent, not only shown in Settings."""
@@ -259,92 +30,6 @@ console.log(JSON.stringify({
         assert "'request_overrides' in _agent_params" in STREAMING_PY
         assert "_agent_kwargs['request_overrides'] = _main_request_overrides" in STREAMING_PY
         assert "_main_request_overrides or {}" in STREAMING_PY
-
-    def test_advanced_modal_uses_defined_theme_tokens_and_inline_button_styles(self):
-        """The modal is appended outside #mainSettings, so scoped button CSS must not be required."""
-        modal_idx = PANELS_JS.find("function _ensureAuxAdvancedModal")
-        assert modal_idx >= 0
-        modal_body = PANELS_JS[modal_idx:modal_idx + 2400]
-        assert "var(--panel)" not in modal_body, "--panel is not a defined WebUI theme token"
-        assert "class=\"settings-btn\"" not in modal_body, "settings-btn is scoped under #mainSettings"
-        assert "background:var(--surface)" in modal_body
-        assert "background:var(--input-bg)" in modal_body
-        assert ":-webkit-autofill" in PANELS_JS
-        assert "settings_aux_advanced_title" in PANELS_JS
-        assert "settings_aux_advanced_button_aria" in PANELS_JS
-
-    def test_advanced_modal_inputs_disable_browser_autofill(self):
-        """Advanced modal fields must not be mistaken for browser login/password fields."""
-        input_helper_idx = PANELS_JS.find("function _auxAdvancedInputHtml")
-        assert input_helper_idx >= 0
-        input_helper = PANELS_JS[input_helper_idx:input_helper_idx + 1200]
-        assert 'autocomplete="off"' in input_helper
-        assert 'data-lpignore="true"' in input_helper
-        assert 'data-1p-ignore="true"' in input_helper
-        assert "aux-manual-override-value" in input_helper
-        assert "aux-${id}" not in input_helper
-        assert "autocompleteAttr" in input_helper
-        api_key_idx = PANELS_JS.find("_auxAdvancedInputHtml('auxAdvancedApiKey'")
-        assert api_key_idx >= 0
-        api_key_call = PANELS_JS[api_key_idx:api_key_idx + 450]
-        assert "'password'" not in api_key_call
-        assert 'autocomplete="one-time-code"' in api_key_call
-        assert "-webkit-text-security:disc" in api_key_call
-
-    def test_calls_model_auxiliary_api(self):
-        """_loadAuxiliaryModels must call /api/model/auxiliary."""
-        assert "/api/model/auxiliary" in PANELS_JS, (
-            "panels.js must call /api/model/auxiliary to fetch current config"
-        )
-
-    def test_calls_model_set_api(self):
-        """_applyAuxModels must call /api/model/set to save changes."""
-        assert "/api/model/set" in PANELS_JS, (
-            "panels.js must call /api/model/set to save auxiliary model changes"
-        )
-
-    def test_provider_cascade(self):
-        """Changing provider must rebuild model dropdown."""
-        assert "_onAuxProviderChange" in PANELS_JS, (
-            "Missing _onAuxProviderChange() for provider→model cascade"
-        )
-        assert "_buildAuxModelOptions" in PANELS_JS, (
-            "Missing _buildAuxModelOptions() for model dropdown rebuild"
-        )
-
-    def test_custom_model_prompt(self):
-        """Selecting 'Custom model…' must prompt for model ID."""
-        assert "__custom__" in PANELS_JS, (
-            "Missing __custom__ sentinel option for custom model input"
-        )
-
-    def test_reset_calls_api_with_reset_task(self):
-        """Reset button must call /api/model/set with task='__reset__'."""
-        idx = PANELS_JS.find("btnResetAuxModels")
-        assert idx >= 0, "btnResetAuxModels not found in panels.js"
-        # Check that __reset__ is sent in the reset handler
-        body_after = PANELS_JS[idx:idx + 2000]
-        assert "__reset__" in body_after, (
-            "Reset handler must send task='__reset__' to /api/model/set"
-        )
-
-    def test_load_called_from_loadSettingsPanel(self):
-        """_loadAuxiliaryModels must be called from loadSettingsPanel."""
-        assert "_loadAuxiliaryModels()" in PANELS_JS, (
-            "_loadAuxiliaryModels() is not called from loadSettingsPanel"
-        )
-
-    def test_dirty_flag_marking(self):
-        """Changing an auxiliary dropdown must mark settings dirty."""
-        assert "_markAuxDirty" in PANELS_JS, (
-            "Missing _markAuxDirty() for dirty detection"
-        )
-        # _markAuxDirty should call _markSettingsDirty
-        idx = PANELS_JS.find("function _markAuxDirty")
-        body = PANELS_JS[idx:idx + 200]
-        assert "_markSettingsDirty" in body, (
-            "_markAuxDirty must call _markSettingsDirty"
-        )
 
 
 class TestAuxiliaryModelsI18n:
@@ -422,26 +107,6 @@ class TestAuxiliaryModelsI18n:
         "settings_aux_task_triage_specifier",
         "settings_aux_task_triage_specifier_desc",
     ]
-
-    def test_all_i18n_keys_present(self):
-        """Every required key must exist in i18n.js at least once."""
-        for key in self.REQUIRED_KEYS:
-            assert key in I18N_JS, (
-                f"Missing i18n key '{key}' in i18n.js"
-            )
-
-    def test_all_locales_have_auxiliary_keys(self):
-        """Count of each key should equal the number of supported locales."""
-        for key in self.REQUIRED_KEYS:
-            count = I18N_JS.count(f"{key}:")
-            assert count == 15, (
-                f"i18n key '{key}' found {count} times — expected 15 (one per locale)"
-            )
-
-    def test_session_search_aux_task_i18n_keys_removed(self):
-        """session_search auxiliary labels were retired from the canonical set."""
-        assert "settings_aux_task_session_search" not in I18N_JS
-        assert "settings_aux_task_session_search_desc" not in I18N_JS
 
 
 class TestAuxiliaryModelsBackend:
@@ -684,18 +349,6 @@ class TestAuxiliaryModelsBackend:
             "Missing AUX_TASK_SLOTS constant in api/config.py"
         )
 
-    def test_js_uses_models_endpoint_not_options(self):
-        """Frontend must use /api/models (WebUI's own API) not /api/model/options (agent API)."""
-        # _loadAuxiliaryModels should call /api/models, not /api/model/options
-        idx = PANELS_JS.find("async function _loadAuxiliaryModels")
-        assert idx >= 0, "_loadAuxiliaryModels not found"
-        body = PANELS_JS[idx:idx + 800]
-        assert "/api/models" in body, (
-            "_loadAuxiliaryModels must call /api/models for provider/model lists"
-        )
-        assert "/api/model/options" not in body, (
-            "_loadAuxiliaryModels must NOT call /api/model/options (agent-only endpoint)"
-        )
 
     def test_set_auxiliary_model_rejects_unknown_task(self, monkeypatch, tmp_path):
         """Unknown auxiliary task names must not pollute config.yaml."""
@@ -856,7 +509,6 @@ class TestAuxiliaryModelsBackend:
 
         assert overrides == {"extra_body": {"reasoning_effort": "none"}}
         assert overrides["extra_body"] is not cfg["model"]["extra_body"]
-
 
 
     def test_set_hermes_default_model_clear_api_key_removes_key(self, monkeypatch, tmp_path):

@@ -26,7 +26,6 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 ROUTES_PY = ROOT / "api" / "routes.py"
-SESSIONS_JS = ROOT / "static" / "sessions.js"
 
 
 # ---------------------------------------------------------------------------
@@ -167,19 +166,6 @@ def test_was_webui_gate_excludes_subagent_children():
     guard = block[guard_start:block.index("return None, \"was_webui\"", guard_start)]
     assert "_is_subagent_child_session_id(sid)" in guard, (
         "all was_webui predicates must share the subagent-child exclusion (#5307)"
-    )
-
-
-def test_sessions_js_open_handlers_keep_isexternalsession_contract():
-    """The fix is server-side + view-only, so sessions.js must be UNCHANGED —
-    the #3603 contract that the open/tap/child handlers gate on
-    _isExternalSession is preserved (subagent children are recovered read-only
-    by the server, not by widening the client import trigger)."""
-    js = SESSIONS_JS.read_text(encoding="utf-8")
-    # We did NOT add a widened import predicate — recovery is server-side.
-    assert "_sessionNeedsServerImportForLoad" not in js, (
-        "the #5307 fix is server-side (read-only recovery); the client import "
-        "predicate must NOT be widened (preserves #3603's _isExternalSession contract)"
     )
 
 

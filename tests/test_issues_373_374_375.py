@@ -12,8 +12,6 @@ REPO = pathlib.Path(__file__).parent.parent
 STREAMING_PY = (REPO / "api" / "streaming.py").read_text(encoding="utf-8")
 CONFIG_PY    = (REPO / "api" / "config.py").read_text(encoding="utf-8")
 ROUTES_PY    = (REPO / "api" / "routes.py").read_text(encoding="utf-8")
-MESSAGES_JS  = (REPO / "static" / "messages.js").read_text(encoding="utf-8")
-UI_JS        = (REPO / "static" / "ui.js").read_text(encoding="utf-8")
 
 
 # ── Issue #373: Silent error detection ──────────────────────────────────────
@@ -52,32 +50,6 @@ class TestSilentErrorDetection:
         )
         assert "auth_mismatch" in STREAMING_PY, (
             "streaming.py must emit auth_mismatch type for auth failures (#373)"
-        )
-
-    def test_messages_js_done_handler_detects_no_reply(self):
-        """messages.js done handler must show an error if no assistant reply arrived."""
-        # Check for either the variable name or the inlined check pattern
-        has_no_reply_guard = (
-            "hasAssistantReply" in MESSAGES_JS
-            or ("role==='assistant'" in MESSAGES_JS and "No response received" in MESSAGES_JS)
-        )
-        assert has_no_reply_guard, (
-            "messages.js done handler must detect zero assistant replies (#373)"
-        )
-        assert "No response received" in MESSAGES_JS, (
-            "messages.js must show 'No response received' inline message (#373)"
-        )
-
-    def test_messages_js_handles_no_response_apperror_type(self):
-        """messages.js apperror handler must recognise the no_response type."""
-        assert "isNoResponse" in MESSAGES_JS or "no_response" in MESSAGES_JS, (
-            "messages.js apperror handler must handle type='no_response' (#373)"
-        )
-
-    def test_messages_js_no_response_label(self):
-        """messages.js must show a distinct label for no_response errors."""
-        assert "No response received" in MESSAGES_JS, (
-            "messages.js must display 'No response received' label for no_response errors (#373)"
         )
 
 
@@ -187,40 +159,6 @@ class TestLiveModelFetching:
             "so all providers are handled uniformly (#375 upgrade)"
         )
 
-    def test_frontend_has_fetch_live_models_function(self):
-        """ui.js must define _fetchLiveModels() for background live model loading (#375)."""
-        assert "function _fetchLiveModels(" in UI_JS or "async function _fetchLiveModels(" in UI_JS, (
-            "ui.js must define _fetchLiveModels() function (#375)"
-        )
-
-    def test_frontend_live_models_cache_exists(self):
-        """ui.js must cache live model responses to avoid redundant API calls (#375)."""
-        assert "_liveModelCache" in UI_JS, (
-            "ui.js must use _liveModelCache to avoid re-fetching on every dropdown open (#375)"
-        )
-
-    def test_frontend_calls_live_models_after_static_load(self):
-        """populateModelDropdown must call _fetchLiveModels after rendering the static list (#375)."""
-        assert "_fetchLiveModels" in UI_JS, (
-            "populateModelDropdown must call _fetchLiveModels for background update (#375)"
-        )
-
-    def test_frontend_live_fetch_only_adds_new_models(self):
-        """_fetchLiveModels must not duplicate models already in the static list (#375)."""
-        assert "existingIds" in UI_JS, (
-            "_fetchLiveModels must track existing model IDs to avoid duplicates (#375)"
-        )
-
-    def test_frontend_live_fetch_covers_all_providers(self):
-        """_fetchLiveModels no longer skips any provider — all providers return
-        live or fallback models via provider_model_ids() on the backend (#375 upgrade)."""
-        # The old skip list (anthropic, google, gemini) must be gone from the guard
-        skip_guard_pos = UI_JS.find("includes(provider)")
-        if skip_guard_pos != -1:
-            guard_line = UI_JS[max(0,skip_guard_pos-100):skip_guard_pos+50]
-            assert "anthropic" not in guard_line, (
-                "_fetchLiveModels must not skip anthropic — backend now handles it (#375 upgrade)"
-            )
 
     def test_live_models_endpoint_wired_in_routes(self):
         """The /api/models/live path must be handled in handle_get()."""
