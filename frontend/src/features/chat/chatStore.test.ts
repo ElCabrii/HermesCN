@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { api } from '@/api/client'
 import { cancelStream as apiCancelStream, startChat, uploadFile } from '@/api/chat'
 import type { CancelStreamResult, ChatStartResult } from '@/api/chat'
+import { openChatStream } from '@/api/sse'
 import { toast } from 'sonner'
 import {
   applyStreamEvent,
@@ -23,6 +24,7 @@ import {
 
 vi.mock('@/api/client', () => ({ api: vi.fn() }))
 vi.mock('@/api/chat', () => ({ startChat: vi.fn(), uploadFile: vi.fn(), cancelStream: vi.fn() }))
+vi.mock('@/api/sse', () => ({ openChatStream: vi.fn() }))
 vi.mock('sonner', () => ({ toast: vi.fn() }))
 
 /** Minimal in-memory backend so session CRUD stays deterministic. */
@@ -78,6 +80,7 @@ beforeEach(() => {
   chatStore.set(inflightAtom, {})
   mockApiRouter()
   vi.mocked(startChat).mockResolvedValue({ stream_id: 'stream-1', session_id: 's1' })
+  vi.mocked(openChatStream).mockReturnValue(vi.fn())
   vi.mocked(uploadFile).mockResolvedValue({
     filename: 'note.txt',
     path: '/tmp/note.txt',

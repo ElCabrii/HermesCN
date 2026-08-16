@@ -1,7 +1,17 @@
 import { atom, createStore } from 'jotai/vanilla'
 import { api } from '@/api/client'
-import { cancelStream as apiCancelStream, startChat, uploadFile, type ChatAttachment, type ChatStartResult } from '@/api/chat'
-import type { ChatStreamEvent } from '@/api/sse'
+import {
+  cancelStream as apiCancelStream,
+  getStreamStatus,
+  startChat,
+  uploadFile,
+  type ApprovalEntry,
+  type ChatAttachment,
+  type ChatStartResult,
+  type ClarifyEntry,
+  type StreamStatus,
+} from '@/api/chat'
+import { openChatStream, type ChatStreamEvent, type ChatStreamHandlers } from '@/api/sse'
 import { toast } from 'sonner'
 
 /**
@@ -61,10 +71,152 @@ export const streamIdAtom = atom<string | null>(null)
 export const pendingFilesAtom = atom<File[]>([])
 export const inflightAtom = atom<InflightMap>({})
 
+/** Live context/token usage driven by `metering` frames and terminal `done` usage. */
+export interface ContextUsage {
+  input_tokens?: number
+  output_tokens?: number
+  tps?: number
+  [key: string]: unknown
+}
+
+/** One in-flight tool call surfaced by SSE `tool` frames (Task 3.5). */
+export interface LiveToolCall {
+  name?: string
+  preview?: string
+  args?: unknown
+  event_type?: string
+  tid?: string
+  done?: boolean
+  _live?: boolean
+  [key: string]: unknown
+}
+
+/** Reconnect banner state (single-retry transport recovery). */
+export interface ReconnectState {
+  stream_id: string
+  message: string
+}
+
+/** Pending tool-approval prompt surfaced by an SSE `approval` frame. */
+export const pendingApprovalAtom = atom<ApprovalEntry | null>(null)
+/** Pending clarification prompt surfaced by an SSE `clarify` frame. */
+export const pendingClarifyAtom = atom<ClarifyEntry | null>(null)
+/** Live context/token usage from `metering` / `done` frames. */
+export const contextUsageAtom = atom<ContextUsage | null>(null)
+/** Active context-compression barrier label (rendered as a centered divider). */
+export const compressingAtom = atom<string | null>(null)
+/** Reconnect banner state while the single-retry re-attach is in flight. */
+export const reconnectAtom = atom<ReconnectState | null>(null)
+/** Live tool cards for the current run (`tool` frames; cleared on terminal). */
+export const liveToolCallsAtom = atom<LiveToolCall[]>([])
+
+/** Clear the streaming-surface atoms (approval/clarify/compression/reconnect/live tools). */
+function resetStreamSurface(): void {
+  chatStore.set(pendingApprovalAtom, null)
+  chatStore.set(pendingClarifyAtom, null)
+  chatStore.set(compressingAtom, null)
+  chatStore.set(reconnectAtom, null)
+  chatStore.set(liveToolCallsAtom, [])
+}
+
 function withoutInflight(entries: InflightMap, sid: string): InflightMap {
   const next = { ...entries }
   delete next[sid]
   return next
+}
+
+// ── SSE transport ────────────────────────────────────────────────────────
+// The store owns the EventSource opened for the active run. `activeStreamClose`
+// closes it on terminal events / session switches; `retriedStreams` enforces
+// the single-retry reconnect budget per stream.
+let activeStreamClose: (() => void) | null = null
+const retriedStreams = new Set<string>()
+
+function closeActiveStream(): void {
+  activeStreamClose?.()
+  activeStreamClose = null
+}
+
+/**
+ * Reconnect on a transport-level EventSource error (Task 3.5). NOT a blind
+ * auto-reconnect: probe GET /api/chat/stream/status first.
+ * - `active: true` → the run is still live server-side (events are buffered
+ *   while no subscriber is attached) → show the reconnect banner and re-open
+ *   the stream exactly once. A second transport failure gives up: error row,
+ *   unlock, toast.
+ * - `active: false` → the run ended → refresh the session transcript and
+ *   clear all stream state.
+ * Stale errors (stream already terminal, or the user switched sessions) are
+ * ignored — they must never mutate the session the user is looking at.
+ */
+async function handleStreamError(streamId: string, activeSid: string): Promise<void> {
+  if (chatStore.get(streamIdAtom) !== streamId) return
+  if (chatStore.get(sessionAtom)?.session_id !== activeSid) return
+
+  if (retriedStreams.has(streamId)) {
+    // Second failure: the single retry already failed — give up.
+    retriedStreams.delete(streamId)
+    closeActiveStream()
+    chatStore.set(messagesAtom, [
+      ...chatStore.get(messagesAtom),
+      { role: 'assistant', content: '**Error:** Connection lost.' },
+    ])
+    chatStore.set(busyAtom, false)
+    chatStore.set(streamIdAtom, null)
+    chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), activeSid))
+    chatStore.set(reconnectAtom, null)
+    toast('Connection lost.')
+    return
+  }
+
+  let status: StreamStatus | null = null
+  try {
+    status = await getStreamStatus(streamId)
+  } catch {
+    status = null
+  }
+  // Re-check the guards after the await (the user may have switched sessions
+  // or the run may have ended while the status probe was in flight).
+  if (chatStore.get(streamIdAtom) !== streamId) return
+  if (chatStore.get(sessionAtom)?.session_id !== activeSid) return
+
+  if (status?.active) {
+    // Single retry: the server buffers events while no subscriber is attached.
+    retriedStreams.add(streamId)
+    chatStore.set(reconnectAtom, { stream_id: streamId, message: 'Connection lost — reconnecting…' })
+    closeActiveStream()
+    activeStreamClose = openChatStream(streamId, {
+      ...streamHandlers(streamId, activeSid),
+      onOpen: () => chatStore.set(reconnectAtom, null),
+    })
+    return
+  }
+
+  // Run ended server-side (or status unreachable): treat as terminal.
+  retriedStreams.delete(streamId)
+  closeActiveStream()
+  chatStore.set(reconnectAtom, null)
+  chatStore.set(busyAtom, false)
+  chatStore.set(streamIdAtom, null)
+  chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), activeSid))
+  try {
+    await loadSession(activeSid)
+  } catch {
+    // Refresh failed; stream state is already cleared — nothing else to do.
+  }
+}
+
+/** Handlers shared by the initial open and the reconnect re-attach. */
+function streamHandlers(streamId: string, activeSid: string): ChatStreamHandlers {
+  return {
+    onEvent: (event) => {
+      chatStore.set(reconnectAtom, null)
+      applyStreamEvent(event)
+    },
+    onError: () => {
+      void handleStreamError(streamId, activeSid)
+    },
+  }
 }
 
 function errorMessage(e: unknown): string {
@@ -88,6 +240,8 @@ export async function newSession(): Promise<Session | null> {
     chatStore.set(messagesAtom, Array.isArray(session.messages) ? session.messages : [])
     chatStore.set(busyAtom, false)
     chatStore.set(streamIdAtom, null)
+    closeActiveStream()
+    resetStreamSurface()
     return session
   } catch {
     return null
@@ -111,6 +265,8 @@ export async function loadSession(sid: string): Promise<Session | null> {
   chatStore.set(messagesAtom, inflight ? inflight.messages : Array.isArray(session.messages) ? session.messages : [])
   chatStore.set(streamIdAtom, null)
   chatStore.set(busyAtom, Boolean(inflight))
+  closeActiveStream()
+  resetStreamSurface()
   return session
 }
 
@@ -222,7 +378,11 @@ export async function sendMessage(text: string, files: File[] = [], model?: stri
 
   if (!('stream_id' in started)) return
   chatStore.set(streamIdAtom, started.stream_id)
-  // busy stays true until a terminal stream event (done/cancel/error) arrives.
+  // Own the SSE transport: open the stream and apply frames to the active
+  // session. busy stays true until a terminal stream event (done/cancel/
+  // error/apperror) or a failed reconnect arrives.
+  closeActiveStream()
+  activeStreamClose = openChatStream(started.stream_id, streamHandlers(started.stream_id, activeSid))
 }
 
 /**
@@ -234,6 +394,7 @@ export async function cancelStream(): Promise<void> {
   const streamId = chatStore.get(streamIdAtom)
   if (!streamId) return
   const sid = chatStore.get(sessionAtom)?.session_id ?? null
+  closeActiveStream()
   try {
     await apiCancelStream(streamId)
   } catch {
@@ -252,8 +413,8 @@ export async function cancelStream(): Promise<void> {
  * mutate or unlock the session the user is looking at).
  *
  * Every applied event is also fanned out to `onChatEvent` subscribers so
- * surface components (approval card, clarify dialog) can react without owning
- * the EventSource.
+ * surface components (approval card, clarify dialog) can react to frames
+ * without owning the EventSource (the store does — see `sendMessage`).
  */
 export function applyStreamEvent(event: ChatStreamEvent): void {
   const sid = chatStore.get(sessionAtom)?.session_id
@@ -272,22 +433,127 @@ export function applyStreamEvent(event: ChatStreamEvent): void {
       chatStore.set(messagesAtom, messages)
       break
     }
-    case 'done':
-    case 'cancel':
+    case 'reasoning': {
+      // Quiet thinking buffer on the live turn (collapsed by default).
+      const messages = [...chatStore.get(messagesAtom)]
+      const last = messages.at(-1)
+      if (last && last.role === 'assistant') {
+        messages[messages.length - 1] = { ...last, reasoning: String(last.reasoning ?? '') + event.text }
+      } else {
+        messages.push({ role: 'assistant', content: '', reasoning: event.text })
+      }
+      chatStore.set(messagesAtom, messages)
+      break
+    }
+    case 'tool': {
+      // Live tool card on the current turn; update in place by tid (or name).
+      const calls = [...chatStore.get(liveToolCallsAtom)]
+      const index = event.tid
+        ? calls.findIndex((call) => call.tid === event.tid)
+        : calls.findIndex((call) => call.name === event.name)
+      const call: LiveToolCall = {
+        ...(index >= 0 ? calls[index] : {}),
+        name: event.name,
+        ...(event.preview !== undefined ? { preview: event.preview } : {}),
+        ...(event.args !== undefined ? { args: event.args } : {}),
+        ...(event.event_type !== undefined ? { event_type: event.event_type } : {}),
+        ...(event.tid !== undefined ? { tid: event.tid } : {}),
+        done: false,
+        _live: true,
+      }
+      if (index >= 0) calls[index] = call
+      else calls.push(call)
+      chatStore.set(liveToolCallsAtom, calls)
+      break
+    }
+    case 'approval':
+      chatStore.set(pendingApprovalAtom, event.data as ApprovalEntry)
+      break
+    case 'clarify':
+      chatStore.set(pendingClarifyAtom, event.data as ClarifyEntry)
+      break
+    case 'metering': {
+      const data = event.data as { usage?: unknown; input_tokens?: unknown; output_tokens?: unknown; tps?: unknown }
+      const usage = (data.usage && typeof data.usage === 'object' ? data.usage : {}) as ContextUsage
+      chatStore.set(contextUsageAtom, {
+        ...chatStore.get(contextUsageAtom),
+        ...usage,
+        ...(typeof data.input_tokens === 'number' ? { input_tokens: data.input_tokens } : {}),
+        ...(typeof data.output_tokens === 'number' ? { output_tokens: data.output_tokens } : {}),
+        ...(typeof data.tps === 'number' ? { tps: data.tps } : {}),
+      })
+      break
+    }
+    case 'compressing':
+      chatStore.set(compressingAtom, event.data.message)
+      break
+    case 'warning': {
+      const message = typeof event.data.message === 'string' ? event.data.message : 'Warning'
+      toast(message)
+      break
+    }
+    case 'apperror': {
+      const data = event.data as { message?: unknown; hint?: unknown }
+      const message = typeof data.message === 'string' ? data.message : 'Something went wrong.'
+      const hint = typeof data.hint === 'string' && data.hint !== '' ? `\n\n${data.hint}` : ''
+      chatStore.set(messagesAtom, [
+        ...chatStore.get(messagesAtom),
+        { role: 'assistant', content: `**Error:** ${message}${hint}` },
+      ])
       chatStore.set(busyAtom, false)
       chatStore.set(streamIdAtom, null)
       chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), sid))
+      closeActiveStream()
+      resetStreamSurface()
+      toast(message)
       break
+    }
+    case 'cancel': {
+      const session = event.data.session
+      if (session && typeof session === 'object') {
+        const carried = session as Session
+        if (carried.session_id && Array.isArray(carried.messages)) {
+          chatStore.set(messagesAtom, carried.messages)
+          chatStore.set(sessionAtom, { ...carried, active_stream_id: null })
+        }
+      }
+      chatStore.set(busyAtom, false)
+      chatStore.set(streamIdAtom, null)
+      chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), sid))
+      closeActiveStream()
+      resetStreamSurface()
+      toast('Cancelled')
+      break
+    }
+    case 'done': {
+      const session = event.session
+      if (session && typeof session === 'object') {
+        const carried = session as Session
+        if (carried.session_id) {
+          if (Array.isArray(carried.messages)) chatStore.set(messagesAtom, carried.messages)
+          chatStore.set(sessionAtom, { ...carried, active_stream_id: null })
+        }
+      }
+      if (event.usage && typeof event.usage === 'object') {
+        chatStore.set(contextUsageAtom, event.usage as ContextUsage)
+      }
+      if (event.terminal_state === 'tool_limit_reached') {
+        toast('Tool limit reached — stopping the run.')
+      }
+      chatStore.set(busyAtom, false)
+      chatStore.set(streamIdAtom, null)
+      chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), sid))
+      closeActiveStream()
+      resetStreamSurface()
+      break
+    }
     case 'error':
       chatStore.set(messagesAtom, [...chatStore.get(messagesAtom), { role: 'assistant', content: `**Error:** ${event.message}` }])
       chatStore.set(busyAtom, false)
       chatStore.set(streamIdAtom, null)
       chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), sid))
-      break
-    default:
-      // tool / reasoning / approval / clarify / metering / compressing /
-      // warning / apperror are surfaced to subscribers below (Task 3.5 owns
-      // the streaming integration that drives these frames).
+      closeActiveStream()
+      resetStreamSurface()
       break
   }
 
@@ -310,7 +576,7 @@ const chatEventListeners = new Set<ChatEventListener>()
 /**
  * Subscribe to stream events applied to the active session. Returns an
  * unsubscribe function. The Composer uses this to surface the approval card
- * and clarify dialog without owning the EventSource.
+ * and clarify dialog (via the store atoms) without owning the EventSource.
  */
 export function onChatEvent(listener: ChatEventListener): () => void {
   chatEventListeners.add(listener)
@@ -344,6 +610,8 @@ export async function deleteSession(sid: string): Promise<boolean> {
     chatStore.set(messagesAtom, [])
     chatStore.set(busyAtom, false)
     chatStore.set(streamIdAtom, null)
+    closeActiveStream()
+    resetStreamSurface()
     const data = await api<{ sessions: Session[] | null }>('/api/sessions', { credentials: 'include' })
     const remaining = (data?.sessions ?? []).filter((s) => s && s.session_id !== sid)
     if (remaining.length > 0) {

@@ -10,6 +10,8 @@ import {
   chatStore,
   messagesAtom,
   onChatEvent,
+  pendingApprovalAtom,
+  pendingClarifyAtom,
   pendingFilesAtom,
   sendMessage,
   sessionAtom,
@@ -38,8 +40,6 @@ function sameApproval(a: ApprovalEntry | null, b: ApprovalEntry | null): boolean
 export function Composer() {
   const [text, setText] = useState('')
   const [model, setModel] = useState<string | null>(null)
-  const [approval, setApproval] = useState<ApprovalEntry | null>(null)
-  const [clarify, setClarify] = useState<ClarifyEntry | null>(null)
   const [micListening, setMicListening] = useState(false)
   const [catalog, setCatalog] = useState<ModelsCatalog | null>(null)
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
@@ -49,6 +49,8 @@ export function Composer() {
   const session = useAtomValue(sessionAtom, { store: chatStore })
   const messages = useAtomValue(messagesAtom, { store: chatStore })
   const pendingFiles = useAtomValue(pendingFilesAtom, { store: chatStore })
+  const approval = useAtomValue(pendingApprovalAtom, { store: chatStore })
+  const clarify = useAtomValue(pendingClarifyAtom, { store: chatStore })
   const sessionId = session?.session_id ?? null
 
   const canSend = !busy && (text.trim().length > 0 || pendingFiles.length > 0)
@@ -87,22 +89,23 @@ export function Composer() {
     setModel(null)
   }, [sessionId])
 
-  // Stream events: surface approval / clarify prompts; clear them on terminal
-  // frames so a card can never outlive its turn.
+  // Stream events: surface approval / clarify prompts (store atoms); terminal
+  // frames clear them so a card can never outlive its turn.
   useEffect(() => {
     return onChatEvent((event) => {
       switch (event.type) {
         case 'approval':
-          setApproval(event.data as ApprovalEntry)
+          chatStore.set(pendingApprovalAtom, event.data as ApprovalEntry)
           break
         case 'clarify':
-          setClarify(event.data as ClarifyEntry)
+          chatStore.set(pendingClarifyAtom, event.data as ClarifyEntry)
           break
         case 'done':
         case 'cancel':
         case 'error':
-          setApproval(null)
-          setClarify(null)
+        case 'apperror':
+          chatStore.set(pendingApprovalAtom, null)
+          chatStore.set(pendingClarifyAtom, null)
           break
         default:
           break
@@ -124,9 +127,9 @@ export function Composer() {
         const data = await getApprovalPending(sessionId)
         if (cancelled) return
         if (data.pending) {
-          setApproval((prev) => (sameApproval(prev, data.pending) ? prev : data.pending))
+          chatStore.set(pendingApprovalAtom, (prev) => (sameApproval(prev, data.pending) ? prev : data.pending))
         } else {
-          setApproval(null)
+          chatStore.set(pendingApprovalAtom, null)
         }
       } catch {
         // poll errors are ignored (legacy behavior)
@@ -279,8 +282,8 @@ export function Composer() {
         tabIndex={-1}
         onChange={handleFilesChange}
       />
-      {approval && sessionId && <ApprovalCard entry={approval} sessionId={sessionId} onResolved={() => setApproval(null)} />}
-      {clarify && sessionId && <ClarifyDialog entry={clarify} sessionId={sessionId} onClose={() => setClarify(null)} />}
+      {approval && sessionId && <ApprovalCard entry={approval} sessionId={sessionId} onResolved={() => chatStore.set(pendingApprovalAtom, null)} />}
+      {clarify && sessionId && <ClarifyDialog entry={clarify} sessionId={sessionId} onClose={() => chatStore.set(pendingClarifyAtom, null)} />}
     </footer>
   )
 }

@@ -10,7 +10,7 @@ import type { JsonObject } from './types'
  */
 export type ChatStreamEvent =
   | { type: 'token'; text: string }
-  | { type: 'tool'; name: string; preview?: string }
+  | { type: 'tool'; name: string; preview?: string; args?: unknown; event_type?: string; tid?: string }
   | { type: 'approval'; data: JsonObject }
   | { type: 'clarify'; data: JsonObject }
   | { type: 'reasoning'; text: string }
@@ -44,6 +44,8 @@ export interface ChatStreamHandlers {
   onEvent(event: ChatStreamEvent): void
   /** Called on transport-level failures (EventSource error without frame data). */
   onError?(error: unknown): void
+  /** Called when the underlying EventSource connection opens. */
+  onOpen?(): void
 }
 
 /** Frame event names (the server-sent `error` frame is handled separately). */
@@ -84,11 +86,16 @@ function parseFrame(name: FrameEventName | 'error', raw: string): ChatStreamEven
       return typeof text === 'string' ? { type: name, text } : null
     }
     case 'tool': {
-      const payload = data as { name?: unknown; preview?: unknown }
+      const payload = data as { name?: unknown; preview?: unknown; args?: unknown; event_type?: unknown; tid?: unknown }
       if (typeof payload.name !== 'string') return null
-      return typeof payload.preview === 'string'
-        ? { type: 'tool', name: payload.name, preview: payload.preview }
-        : { type: 'tool', name: payload.name }
+      return {
+        type: 'tool',
+        name: payload.name,
+        ...(typeof payload.preview === 'string' ? { preview: payload.preview } : {}),
+        ...(payload.args !== undefined ? { args: payload.args } : {}),
+        ...(typeof payload.event_type === 'string' ? { event_type: payload.event_type } : {}),
+        ...(typeof payload.tid === 'string' ? { tid: payload.tid } : {}),
+      }
     }
     case 'approval':
       return { type: 'approval', data: data as JsonObject }
@@ -171,6 +178,8 @@ function parseFrame(name: FrameEventName | 'error', raw: string): ChatStreamEven
  */
 export function openChatStream(streamId: string, handlers: ChatStreamHandlers): () => void {
   const source = new EventSource(`/api/chat/stream?stream_id=${encodeURIComponent(streamId)}`)
+
+  source.onopen = () => handlers.onOpen?.()
 
   for (const name of FRAME_EVENTS) {
     source.addEventListener(name, (event: Event) => {

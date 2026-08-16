@@ -10,6 +10,7 @@ import {
   uploadFile,
 } from '@/api/chat'
 import { getModels } from '@/api/models'
+import { openChatStream } from '@/api/sse'
 import { toast } from 'sonner'
 import {
   applyStreamEvent,
@@ -33,6 +34,7 @@ vi.mock('@/api/chat', () => ({
   respondApproval: vi.fn(),
   respondClarify: vi.fn(),
 }))
+vi.mock('@/api/sse', () => ({ openChatStream: vi.fn() }))
 vi.mock('@/api/models', () => ({ getModels: vi.fn() }))
 vi.mock('sonner', () => ({ toast: vi.fn() }))
 
@@ -71,6 +73,7 @@ beforeEach(() => {
   chatStore.set(streamIdAtom, null)
   chatStore.set(pendingFilesAtom, [])
   vi.mocked(startChat).mockResolvedValue({ stream_id: 'stream-1', session_id: 'a' })
+  vi.mocked(openChatStream).mockReturnValue(vi.fn())
   vi.mocked(uploadFile).mockResolvedValue({
     filename: 'note.txt',
     path: '/tmp/note.txt',
