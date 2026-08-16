@@ -226,6 +226,38 @@ export function createFile(
   })
 }
 
+/** Create a new directory inside the session workspace (fails with 400 when it exists). */
+export function createDir(sessionId: string, path: string): Promise<FileCreateResponse> {
+  return api<FileCreateResponse>('/api/file/create-dir', {
+    method: 'POST',
+    body: JSON.stringify({ session_id: sessionId, path }),
+    credentials: 'include',
+  })
+}
+
+/** Response of POST /api/file/rename (old + resolved new relative posix paths). */
+export interface FileRenameResponse extends JsonObject {
+  ok: true
+  old_path: string
+  new_path: string
+}
+
+/**
+ * Rename a workspace file or directory. `newName` is the bare leaf name (no
+ * separators); the server rejects names containing `/`, `\`, or `..`.
+ */
+export function renameFile(
+  sessionId: string,
+  path: string,
+  newName: string,
+): Promise<FileRenameResponse> {
+  return api<FileRenameResponse>('/api/file/rename', {
+    method: 'POST',
+    body: JSON.stringify({ session_id: sessionId, path, new_name: newName }),
+    credentials: 'include',
+  })
+}
+
 // ── GET /api/workspaces ───────────────────────────────────────────────────
 
 /** One workspace row (`api/workspace.py` `load_workspaces`). */

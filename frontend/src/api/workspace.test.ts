@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from './client'
 import {
   addWorkspace,
+  createDir,
   createFile,
   deleteFile,
   fetchFileRaw,
@@ -13,11 +14,13 @@ import {
   listDir,
   readFile,
   removeWorkspace,
+  renameFile,
   renameWorkspace,
   reorderWorkspaces,
   saveFile,
   suggestWorkspaces,
   type FileContent,
+  type FileRenameResponse,
   type GitBranchesResponse,
   type GitDiffResponse,
   type GitStatusResponse,
@@ -472,5 +475,52 @@ describe('git endpoints', () => {
       fetchMock,
       '/api/git/diff?session_id=abc123&path=README.md&kind=staged',
     )
+  })
+})
+
+describe('renameFile', () => {
+  const RENAME: FileRenameResponse = {
+    ok: true,
+    old_path: 'notes.txt',
+    new_path: 'renamed.txt',
+  }
+
+  it('POSTs session_id, path, and new_name', async () => {
+    const fetchMock = fetchMockResolving(RENAME)
+    await expect(renameFile(SID, 'notes.txt', 'renamed.txt')).resolves.toEqual(RENAME)
+    expectFetchCall(fetchMock, '/api/file/rename', {
+      method: 'POST',
+      body: { session_id: SID, path: 'notes.txt', new_name: 'renamed.txt' },
+      contentType: 'application/json',
+    })
+  })
+
+  it('throws ApiError when the target name already exists', async () => {
+    fetchMockResolving({ error: 'A file named "renamed.txt" already exists' }, 400)
+    await expect(renameFile(SID, 'notes.txt', 'renamed.txt')).rejects.toMatchObject({
+      status: 400,
+      message: 'A file named "renamed.txt" already exists',
+    })
+  })
+})
+
+describe('createDir', () => {
+  it('POSTs session_id and path to /api/file/create-dir', async () => {
+    const body = { ok: true as const, path: 'assets' }
+    const fetchMock = fetchMockResolving(body)
+    await expect(createDir(SID, 'assets')).resolves.toEqual(body)
+    expectFetchCall(fetchMock, '/api/file/create-dir', {
+      method: 'POST',
+      body: { session_id: SID, path: 'assets' },
+      contentType: 'application/json',
+    })
+  })
+
+  it('throws ApiError when the directory already exists', async () => {
+    fetchMockResolving({ error: 'Path already exists' }, 400)
+    await expect(createDir(SID, 'assets')).rejects.toMatchObject({
+      status: 400,
+      message: 'Path already exists',
+    })
   })
 })
