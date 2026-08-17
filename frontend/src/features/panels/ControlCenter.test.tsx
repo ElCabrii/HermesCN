@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { getCrons, getProfiles, getSettings, readMemory, getSkills } from '@/api/panels'
+import { getCrons, getProfiles, getProviderQuota, getProviders, getSettings, readMemory, getSkills } from '@/api/panels'
 import { getModels } from '@/api/models'
 import { getWorkspaces } from '@/api/workspace'
 import { ControlCenter } from './ControlCenter'
@@ -17,6 +17,8 @@ vi.mock('@/api/panels', async (importOriginal) => {
     readMemory: vi.fn(),
     getProfiles: vi.fn(),
     getSettings: vi.fn(),
+    getProviders: vi.fn(),
+    getProviderQuota: vi.fn(),
   }
 })
 vi.mock('@/api/models', () => ({ getModels: vi.fn() }))
@@ -33,6 +35,8 @@ const getSkillsMock = vi.mocked(getSkills)
 const readMemoryMock = vi.mocked(readMemory)
 const getProfilesMock = vi.mocked(getProfiles)
 const getSettingsMock = vi.mocked(getSettings)
+const getProvidersMock = vi.mocked(getProviders)
+const getProviderQuotaMock = vi.mocked(getProviderQuota)
 const getModelsMock = vi.mocked(getModels)
 const getWorkspacesMock = vi.mocked(getWorkspaces)
 
@@ -81,6 +85,15 @@ beforeEach(() => {
   getSettingsMock.mockResolvedValue({ default_model: 'gpt-4o', send_key: 'enter', language: 'en' })
   getModelsMock.mockResolvedValue({ active_provider: 'openai', default_model: 'gpt-4o', groups: [] })
   getWorkspacesMock.mockResolvedValue({ workspaces: [], last: '', terminal_remote_backend: false })
+  getProvidersMock.mockResolvedValue({ providers: [], active_provider: null })
+  getProviderQuotaMock.mockResolvedValue({
+    ok: false,
+    provider: null,
+    supported: false,
+    status: 'unavailable',
+    quota: null,
+    message: 'No active provider is configured.',
+  })
 })
 
 describe('ControlCenter', () => {
@@ -107,7 +120,7 @@ describe('ControlCenter', () => {
     await user.click(screen.getByRole('button', { name: /control center/i }))
     await screen.findByRole('dialog')
 
-    const tabs = ['Tasks', 'Skills', 'Memory', 'Profiles', 'Todo', 'Settings']
+    const tabs = ['Tasks', 'Skills', 'Memory', 'Profiles', 'Providers', 'Todo', 'Settings']
     for (const tab of tabs) {
       await user.click(screen.getByRole('tab', { name: tab }))
     }
@@ -117,6 +130,8 @@ describe('ControlCenter', () => {
     await waitFor(() => expect(getSkillsMock).toHaveBeenCalled())
     await waitFor(() => expect(readMemoryMock).toHaveBeenCalled())
     await waitFor(() => expect(getProfilesMock).toHaveBeenCalled())
+    await waitFor(() => expect(getProvidersMock).toHaveBeenCalled())
+    await waitFor(() => expect(getProviderQuotaMock).toHaveBeenCalled())
     await waitFor(() => expect(getSettingsMock).toHaveBeenCalled())
     await waitFor(() => expect(getModelsMock).toHaveBeenCalled())
     await waitFor(() => expect(getWorkspacesMock).toHaveBeenCalled())

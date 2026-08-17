@@ -10,8 +10,8 @@
 
 > Fork direction (HermesCN): the Python backend is kept as-is and remains the
 > stable core. The frontend is being remade in React + Vite + shadcn/ui in
-> `frontend/`, migrating surface-by-surface off the legacy vanilla-JS `static/`
-> frontend. See Section 5.0 and Phase K for the rules of the remake.
+> `frontend/`, replacing the legacy vanilla-JS `static/` frontend (now removed).
+> See Section 5.0 and Phase K for the rules of the remake.
 
 > Current shipped build: `v0.51.792` (July 1, 2026).
 > Automated coverage: ~11,500 tests via `pytest tests/ --collect-only -q`. CI runs on
@@ -31,10 +31,9 @@ and a demand-driven right panel used for workspace browsing and preview surfaces
 The right panel is closed by default on desktop and opens only when it is actively
 being used for browsing or previewing content.
 
-To prevent a visible first-paint mismatch on refresh, `static/index.html` preloads the
-saved workspace panel state into `document.documentElement.dataset.workspacePanel`
-before the main stylesheet loads. Desktop CSS honors that preload marker immediately,
-and `static/boot.js` keeps the dataset synchronized with the runtime panel state machine.
+To prevent a visible first-paint mismatch on refresh, the React app reads the
+saved workspace panel state from the API on boot and renders the correct panel
+state immediately.
 
 The design philosophy of the original project was deliberately minimal: no build
 step, no bundler, no frontend framework. The Python server is split into a routing
@@ -81,25 +80,9 @@ actions. The topbar remains focused on conversation context and the workspace/fi
       updates.py           Self-update check and release notes
       upload.py            Multipart parser, file upload handler
       workspace.py         File ops: list_dir, read_file_content, git detection, workspace helpers
-    static/
-      index.html           HTML template
-      style.css            All CSS incl. mobile responsive, themes + skins, KaTeX
-      ui.js                DOM helpers, renderMd, tool cards, context indicator, file tree
-      workspace.js         File preview, file ops, git badge, central api() fetch wrapper
-      sessions.js          Session CRUD, list rendering, collapsible groups, search, SSE sync
-      messages.js          send(), SSE event handlers, approval/clarify, transcript, recovery
-      panels.js            Cron, skills, memory, profiles, todo, settings (Control Center)
-      commands.js          Slash command registry, parser, autocomplete dropdown
-      boot.js              Event wiring, mobile nav, voice input, theme/skin boot, bfcache handler
-      onboarding.js        First-run wizard overlay, provider setup flow
-      i18n.js              Localization catalog (en, es, de, zh, zh-Hant, ru, …)
-      login.js             Login page + open-redirect guard
-      icons.js             Lucide icon path registry
-      sw.js                Service worker: offline shell cache, version-pinned assets
     frontend/              PRIMARY HermesCN frontend (React + Vite + TS + Tailwind + shadcn/ui).
-                           The Python server serves frontend/dist/ when present; static/
-                           remains only as fallback (terminal panel, slash commands, and the
-                           legacy shell still live there). See Section 5.0 and Phase K.
+                           The Python server serves frontend/dist/ when built; the legacy
+                           static/ tree has been removed. See Section 5.0 and Phase K.
       src/api/             Hand-written typed client for the existing HTTP API
       src/components/      shadcn/ui components
       src/features/        One directory per migrated surface (chat, sessions, …)
@@ -439,9 +422,10 @@ for that work; the rest of Section 5 documents the legacy `static/` frontend.
   backend). No API redesign during the remake; Phase F stays deferred.
 - **Dev:** Vite dev server proxies `/api` and `/static` to the Python server
   (default http://127.0.0.1:8787). Backend runs unchanged via bootstrap.py.
-- **Prod:** once parity is reached, the Python server serves `frontend/dist/`
-  instead of `static/` (a small change in the static-serving layer, not a
-  backend rewrite). Until then `static/` remains the fallback.
+- **Prod:** the Python server serves `frontend/dist/` (a small change in the
+  static-serving layer, not a backend rewrite). The legacy `static/` tree has
+  been removed; a missing build returns a precise "Frontend is not built"
+  error rather than a restart placeholder.
 
 ### 5.0.2 Migration rules
 
@@ -471,31 +455,35 @@ for that work; the rest of Section 5 documents the legacy `static/` frontend.
 
 ### 5.0.4 Status (2026-08-16)
 
-**Migrated to `frontend/` (the Python server now serves `frontend/dist/` when
-present):**
+**Migrated to `frontend/` (the Python server serves `frontend/dist/`):**
 
-- Auth: login page + route guard (password + OIDC)
+- Auth: login page + route guard (password + OIDC + passkeys)
 - Chat: SSE streaming, composer (upload, model selector, cancel), approval +
-  clarify, markdown + tool cards, reconnect
-- Sessions: sidebar list, search, CRUD with the §5.6 delete rules
+  clarify, markdown + tool cards, reconnect, slash commands
+- Sessions: sidebar list, search, CRUD with the §5.6 delete rules, deep links
 - Workspace: file tree, preview, editor
-- Panels: Control Center (cron, skills, memory, profiles, todo, settings)
+- Panels: Control Center (tasks, skills, memory, profiles, providers, todo,
+  settings)
 - Onboarding wizard + OAuth linking
 - Share page (read-only transcript)
-- i18n (en catalog, 429 keys), themes + skins, PWA (manifest + service worker)
+- Terminal panel (xterm)
+- i18n (en catalog), themes + skins, PWA (manifest + service worker)
 - Prod serving: `api/routes.py` serves `frontend/dist/` (index.html with token
-  substitution, `/assets/*` with correct Content-Type) when present, falling
-  back to `static/` when absent
+  substitution, `/assets/*` with correct Content-Type, PWA icons/manifest/sw)
 
-**Not yet migrated (still served from `static/`):**
+**Removed:** the legacy `static/` tree (deleted in the remake). The Python
+server no longer falls back to it; a missing build returns a precise
+"Frontend is not built" error with build instructions.
 
-- Terminal panel (`static/terminal.js`, xterm)
-- Slash commands (`static/commands.js`)
-- The legacy shell itself (`static/index.html`, boot.js, ui.js, …) — the
-  fallback when `dist/` is absent; `static/` deletion is deferred until the
-  terminal and slash-command surfaces have React equivalents
+**Packaging:** the wheel and Docker image ship the built React app. The wheel
+installs `frontend/dist/` as package data; the Dockerfile builds the frontend
+in a Node stage and copies the assets into the runtime image.
 
-Frontend status: 478 Vitest tests green; full Python suite green.
+Frontend status: 614 Vitest tests green; the Python suite passes except for a
+small set of pre-existing environment-dependent failures (see TESTING.md).
+
+See [`docs/FRONTEND-PARITY.md`](docs/FRONTEND-PARITY.md) for the authoritative
+surface-by-surface parity matrix.
 
 ---
 
@@ -932,7 +920,12 @@ Replacing with marked.js + DOMPurify is a future improvement (not blocking).
 Optional password gate for non-SSH-tunnel deployments.
 
 1. HERMES_WEBUI_PASSWORD env var enables auth
-2. Login page: minimal dark form, POST /api/auth/login
+2. Login surface is owned by the React app: `/login` is served by the SPA
+   shell condition (same as `/` and `/session/:id`), so `LoginPage.tsx` renders
+   client-side. The legacy server-rendered `static/login.js` page, the
+   `_LOGIN_PAGE_HTML` template, and the `_LOGIN_LOCALE` table were removed with
+   the `static/` tree. The shell is locale-neutral; UI localization is the React
+   i18n layer's job (catalogs ported from `static/i18n.js` — see Phase K).
 3. Server sets HttpOnly + SameSite=Strict cookie on successful login
 4. All API endpoints check cookie if HERMES_WEBUI_PASSWORD is set
 5. Cookie validity: 30 days from last activity

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   ArrowLeftIcon,
+  ClockIcon,
   FileTextIcon,
   Loader2Icon,
   PauseIcon,
@@ -236,6 +237,22 @@ export function TasksPanel() {
           {jobs === null && (
             <li className="flex items-center gap-2 px-1 py-3 text-xs text-muted-foreground">
               <Loader2Icon className="size-3 animate-spin" /> Loading tasks…
+            </li>
+          )}
+          {/* Tasks is the Control Center's landing tab, so on a fresh install
+              the first thing anyone sees here is this panel with nothing in it.
+              Say what the feature is for rather than showing a blank pane. */}
+          {jobs?.length === 0 && (
+            <li
+              data-testid="tasks-empty"
+              className="flex flex-col items-center gap-2 px-6 py-14 text-center"
+            >
+              <ClockIcon className="size-6 text-muted-foreground/60" />
+              <p className="text-sm font-medium text-foreground">No scheduled tasks yet</p>
+              <p className="max-w-xs text-xs text-muted-foreground">
+                Scheduled tasks run a prompt on a cron schedule — a morning digest, a nightly
+                cleanup, a recurring check — and keep their output here.
+              </p>
             </li>
           )}
           {jobs?.map((job) => (

@@ -1,10 +1,21 @@
-import { useContext, useEffect, useMemo, useRef, useState, type ChangeEvent, type KeyboardEvent } from 'react'
+import {
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ClipboardEvent,
+  type DragEvent,
+  type KeyboardEvent,
+} from 'react'
 import { useAtomValue } from 'jotai'
 import { toast } from 'sonner'
 import { ThemeContext } from '@/theme/ThemeProvider'
 import { DEFAULT_SKIN, DEFAULT_THEME, type ThemeMode } from '@/theme/skins'
 import { getApprovalPending, type ApprovalEntry, type ClarifyEntry } from '@/api/chat'
 import { getModels, type ModelsCatalog } from '@/api/models'
+import { getSettings, SETTINGS_CHANGED_EVENT } from '@/api/panels'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -40,9 +51,47 @@ import {
   type SlashCommandContext,
 } from './slashCommands'
 import { ArrowUpIcon, MicIcon, PaperclipIcon, SquareIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { ContextRing } from './ContextRing'
 
 /** Approval fallback poll cadence (legacy messages.js `_startApprovalFallbackPoll`). */
 const APPROVAL_POLL_MS = 1500
+
+/** Ceiling for the auto-growing input, so a long draft cannot swallow the transcript. */
+const COMPOSER_MAX_HEIGHT_PX = 220
+
+/** Which chord sends the message (settings.json `send_key`). */
+type SendKey = 'enter' | 'ctrl+enter' | 'shift+enter'
+
+const SEND_KEYS: SendKey[] = ['enter', 'ctrl+enter', 'shift+enter']
+
+function asSendKey(value: unknown): SendKey {
+  return typeof value === 'string' && (SEND_KEYS as string[]).includes(value)
+    ? (value as SendKey)
+    : 'enter'
+}
+
+/** Does this Enter keypress mean "send" under the configured send key? */
+function isSendChord(event: KeyboardEvent<HTMLTextAreaElement>, sendKey: SendKey): boolean {
+  if (event.key !== 'Enter' || event.nativeEvent.isComposing) return false
+  const withMod = event.metaKey || event.ctrlKey
+  switch (sendKey) {
+    case 'ctrl+enter':
+      return withMod
+    case 'shift+enter':
+      return event.shiftKey && !withMod
+    default:
+      // Plain Enter sends; ⌘/Ctrl-Enter is accepted too so the muscle memory
+      // from every other chat client still works.
+      return !event.shiftKey || withMod
+  }
+}
+
+const SEND_HINTS: Record<SendKey, string> = {
+  enter: 'Send (Enter)',
+  'ctrl+enter': 'Send (⌘/Ctrl + Enter)',
+  'shift+enter': 'Send (Shift + Enter)',
+}
 
 /** Stable one-liner for an unknown error value (toast payloads). */
 function errorMessage(e: unknown): string {
@@ -67,6 +116,7 @@ export function Composer() {
   const [model, setModel] = useState<string | null>(null)
   const [micListening, setMicListening] = useState(false)
   const [catalog, setCatalog] = useState<ModelsCatalog | null>(null)
+  const [sendKey, setSendKey] = useState<SendKey>('enter')
   // Slash-command autocomplete state (plan Task 8.7). `slashTextRef` mirrors
   // the draft so async autocomplete results can be dropped when the user
   // typed past them (stale-guard, same pattern as the legacy `input` guard).
@@ -76,6 +126,9 @@ export function Composer() {
   const slashTextRef = useRef('')
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  // True while a drag carrying files is over the composer.
+  const [dragging, setDragging] = useState(false)
 
   const busy = useAtomValue(busyAtom, { store: chatStore })
   const session = useAtomValue(sessionAtom, { store: chatStore })
@@ -105,6 +158,28 @@ export function Composer() {
       }),
     [],
   )
+
+  /**
+   * The user's send-key preference. It has always been offered in Settings and
+   * never honoured here, so picking "ctrl+enter" changed nothing and Enter kept
+   * firing off half-written messages. Re-read on save so the choice applies
+   * without a reload.
+   */
+  useEffect(() => {
+    let cancelled = false
+    const apply = (settings: Record<string, unknown> | null | undefined) => {
+      if (!cancelled) setSendKey(asSendKey(settings?.send_key))
+    }
+    getSettings().then(apply).catch(() => {
+      // Unreachable settings: keep the Enter default.
+    })
+    const onChanged = (event: Event) => apply((event as CustomEvent).detail)
+    window.addEventListener(SETTINGS_CHANGED_EVENT, onChanged)
+    return () => {
+      cancelled = true
+      window.removeEventListener(SETTINGS_CHANGED_EVENT, onChanged)
+    }
+  }, [])
 
   // Model catalog for the selector; failures fall back to the session model.
   useEffect(() => {
@@ -150,6 +225,25 @@ export function Composer() {
     })
   }, [])
 
+  /**
+   * Esc stops the run. Stopping a runaway turn is the most urgent thing a user
+   * can want from this surface, and reaching for the mouse to hit a small
+   * square button is the wrong cost for it. Skipped while a dialog or the slash
+   * menu owns Escape, and while an approval prompt is waiting on a decision.
+   */
+  useEffect(() => {
+    if (!busy) return
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      if (document.querySelector('[role="dialog"]')) return
+      if (chatStore.get(pendingApprovalAtom) || chatStore.get(pendingClarifyAtom)) return
+      event.preventDefault()
+      void cancelStream()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [busy])
+
   // Approval fallback poll: while busy, refresh the pending approval every
   // 1.5s (legacy `_startApprovalFallbackPoll`). The SSE path above stays the
   // fast channel; this covers missed frames.
@@ -184,6 +278,19 @@ export function Composer() {
     }
   }, [busy, sessionId])
 
+  /**
+   * Grow the input with its content instead of trapping multi-line drafts in a
+   * one-row box with an inner scrollbar. Height is recomputed from scrollHeight
+   * on every change (reset to 'auto' first so the box can also shrink back when
+   * text is deleted) and capped so the composer can never eat the transcript.
+   */
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_HEIGHT_PX)}px`
+  }, [text])
+
   // Compact circular context-usage badge (DESIGN.md). Prefers the session's
   // usage fields; falls back to a chars/4 estimate of the transcript so the
   // badge is live while tokens stream in.
@@ -198,6 +305,14 @@ export function Composer() {
     if (!tokens || tokens <= 0) return null
     return Math.min(100, Math.max(0, Math.round((tokens / ctxLength) * 100)))
   }, [session, messages])
+
+  /** Absolute token figures behind the ring's tooltip, when the session has them. */
+  const contextDetail = useMemo(() => {
+    const ctxLength = typeof session?.context_length === 'number' ? session.context_length : 0
+    const tokens = typeof session?.last_prompt_tokens === 'number' ? session.last_prompt_tokens : null
+    if (!ctxLength || tokens == null) return null
+    return `${tokens.toLocaleString()} of ${ctxLength.toLocaleString()} tokens`
+  }, [session])
 
   /**
    * Range of the active slash token being completed (`/name [arg]`), or null
@@ -380,17 +495,72 @@ export function Composer() {
         return
       }
     }
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    if (isSendChord(event, sendKey)) {
       event.preventDefault()
       handleSend()
     }
   }
 
-  const handleFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(event.target.files ?? [])
+  /** Single funnel for every attachment source: picker, paste, and drop. */
+  const addFiles = (files: File[]) => {
     if (files.length === 0) return
     chatStore.set(pendingFilesAtom, [...chatStore.get(pendingFilesAtom), ...files])
+  }
+
+  const handleFilesChange = (event: ChangeEvent<HTMLInputElement>) => {
+    addFiles(Array.from(event.target.files ?? []))
     event.target.value = ''
+  }
+
+  /**
+   * Paste-to-attach. Screenshots are the most common thing a user wants to hand
+   * an agent, and they arrive on the clipboard with no filename — synthesize a
+   * readable one so the pending chip and the server both have something to show.
+   */
+  const handlePaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = Array.from(event.clipboardData?.items ?? [])
+    const pasted: File[] = []
+    for (const item of items) {
+      if (item.kind !== 'file') continue
+      const file = item.getAsFile()
+      if (!file) continue
+      if (file.name && file.name !== 'image.png') {
+        pasted.push(file)
+        continue
+      }
+      const ext = file.type.split('/')[1] || 'png'
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+      pasted.push(new File([file], `pasted-${stamp}.${ext}`, { type: file.type }))
+    }
+    if (pasted.length === 0) return
+    // Only claim the event when we actually took files; plain text paste must
+    // keep its native behavior.
+    event.preventDefault()
+    addFiles(pasted)
+    toast(pasted.length === 1 ? 'Attached pasted file' : `Attached ${pasted.length} pasted files`)
+  }
+
+  const dragCarriesFiles = (event: DragEvent<HTMLElement>) =>
+    Array.from(event.dataTransfer?.types ?? []).includes('Files')
+
+  const handleDragOver = (event: DragEvent<HTMLElement>) => {
+    if (!dragCarriesFiles(event) || busy) return
+    event.preventDefault()
+    setDragging(true)
+  }
+
+  const handleDragLeave = (event: DragEvent<HTMLElement>) => {
+    // Ignore the leave events fired while crossing child elements.
+    if (event.currentTarget.contains(event.relatedTarget as Node | null)) return
+    setDragging(false)
+  }
+
+  const handleDrop = (event: DragEvent<HTMLElement>) => {
+    if (!dragCarriesFiles(event)) return
+    event.preventDefault()
+    setDragging(false)
+    if (busy) return
+    addFiles(Array.from(event.dataTransfer?.files ?? []))
   }
 
   const toggleMic = () => {
@@ -429,7 +599,16 @@ export function Composer() {
       : 'Voice input'
 
   return (
-    <footer data-testid="composer" className="border-t border-border bg-background/95 px-3 pt-2 pb-2.5">
+    <footer
+      data-testid="composer"
+      data-dragging={dragging ? 'true' : undefined}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      // The bottom padding clears the iOS home indicator; without the safe-area
+      // inset the send button sits under it on a phone.
+      className="relative border-t border-border bg-background/95 px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur supports-[backdrop-filter]:bg-background/80"
+    >
       {slashOpen && slashMatches.length > 0 && (
         <SlashMenu
           matches={slashMatches}
@@ -438,21 +617,35 @@ export function Composer() {
           onMouseEnter={(index) => setSlashSelected(index)}
         />
       )}
-      <PendingFiles files={pendingFiles} onRemove={(index) => chatStore.set(pendingFilesAtom, pendingFiles.filter((_, i) => i !== index))} />
-      <div className="flex items-end gap-1.5">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Attach files"
-          title="Attach files"
-          className="text-muted-foreground"
-          disabled={busy}
-          onClick={() => fileInputRef.current?.click()}
+      {/* Drop target feedback. Files could always be dropped nowhere before;
+          now the whole composer accepts them and says so. */}
+      {dragging && (
+        <div
+          data-testid="composer-drop-overlay"
+          className="pointer-events-none absolute inset-1 z-20 flex items-center justify-center rounded-2xl border-2 border-dashed border-accent bg-background/85 text-sm font-medium text-foreground"
         >
-          <PaperclipIcon />
-        </Button>
+          Drop files to attach
+        </div>
+      )}
+      <PendingFiles
+        files={pendingFiles}
+        onRemove={(index) =>
+          chatStore.set(pendingFilesAtom, pendingFiles.filter((_, i) => i !== index))
+        }
+      />
+      {/* Two rows: the draft owns the full width, controls sit underneath. The
+          previous single row squeezed the text between five controls, so the
+          model name truncated and long drafts had almost no room. */}
+      <div
+        className={cn(
+          'group/composer flex flex-col gap-1 rounded-2xl border border-border bg-card/60 px-2 py-1.5 transition-colors',
+          'focus-within:border-accent/60 focus-within:bg-card',
+        )}
+      >
         <Textarea
+          ref={textareaRef}
           aria-label="Message"
+          data-testid="composer-textarea"
           value={text}
           onChange={(event) => {
             const value = event.target.value
@@ -461,40 +654,69 @@ export function Composer() {
             refreshSlashAutocomplete(value)
           }}
           onKeyDown={handleKeyDown}
-          placeholder="Message…"
+          onPaste={handlePaste}
+          placeholder="Message Hermes…  (type / for commands)"
           rows={1}
-          className="min-h-0 max-h-[200px] resize-none overflow-y-auto border-border bg-background/60 py-2 pr-3 pl-3 text-sm"
+          className="min-h-0 w-full resize-none overflow-y-auto border-0 bg-transparent px-1 py-1.5 text-sm leading-[1.55] shadow-none focus-visible:ring-0"
+          style={{ maxHeight: COMPOSER_MAX_HEIGHT_PX }}
         />
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Voice input"
-          aria-pressed={micListening}
-          title={micTitle}
-          className={micListening ? 'bg-accent text-accent-foreground' : 'text-muted-foreground'}
-          disabled={micUnavailable || busy}
-          onClick={toggleMic}
-        >
-          {micListening ? <SquareIcon /> : <MicIcon />}
-        </Button>
-        <ModelSelector value={model} catalog={catalog} currentLabel={session?.model ?? null} onChange={setModel} />
-        <span
-          data-testid="context-usage"
-          data-context-pct={contextPct ?? undefined}
-          title={contextPct != null ? `Context: ${contextPct}% used` : 'Context usage unknown'}
-          className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border font-mono text-[10px] text-muted-foreground"
-        >
-          {contextPct != null ? `${contextPct}%` : '–'}
-        </span>
-        {busy ? (
-          <Button variant="destructive" size="icon" aria-label="Stop" title="Stop" onClick={() => void cancelStream()}>
-            <SquareIcon />
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Attach files"
+            title="Attach files — or paste and drop them here"
+            className="text-muted-foreground"
+            disabled={busy}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <PaperclipIcon />
           </Button>
-        ) : (
-          <Button size="icon" aria-label="Send" title="Send" disabled={!canSend} onClick={handleSend}>
-            <ArrowUpIcon />
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Voice input"
+            aria-pressed={micListening}
+            title={micTitle}
+            className={cn(
+              'text-muted-foreground',
+              micListening && 'bg-destructive/15 text-destructive',
+            )}
+            disabled={micUnavailable || busy}
+            onClick={toggleMic}
+          >
+            {micListening ? <SquareIcon /> : <MicIcon />}
           </Button>
-        )}
+          <ModelSelector
+            value={model}
+            catalog={catalog}
+            currentLabel={session?.model ?? null}
+            onChange={setModel}
+          />
+          <div className="flex-1" />
+          <ContextRing pct={contextPct} detail={contextDetail} />
+          {busy ? (
+            <Button
+              variant="destructive"
+              size="icon"
+              aria-label="Stop"
+              title="Stop generating (Esc)"
+              onClick={() => void cancelStream()}
+            >
+              <SquareIcon />
+            </Button>
+          ) : (
+            <Button
+              size="icon"
+              aria-label="Send"
+              title={SEND_HINTS[sendKey]}
+              disabled={!canSend}
+              onClick={handleSend}
+            >
+              <ArrowUpIcon />
+            </Button>
+          )}
+        </div>
       </div>
       <input
         ref={fileInputRef}
@@ -505,8 +727,20 @@ export function Composer() {
         tabIndex={-1}
         onChange={handleFilesChange}
       />
-      {approval && sessionId && <ApprovalCard entry={approval} sessionId={sessionId} onResolved={() => chatStore.set(pendingApprovalAtom, null)} />}
-      {clarify && sessionId && <ClarifyDialog entry={clarify} sessionId={sessionId} onClose={() => chatStore.set(pendingClarifyAtom, null)} />}
+      {approval && sessionId && (
+        <ApprovalCard
+          entry={approval}
+          sessionId={sessionId}
+          onResolved={() => chatStore.set(pendingApprovalAtom, null)}
+        />
+      )}
+      {clarify && sessionId && (
+        <ClarifyDialog
+          entry={clarify}
+          sessionId={sessionId}
+          onClose={() => chatStore.set(pendingClarifyAtom, null)}
+        />
+      )}
     </footer>
   )
 }

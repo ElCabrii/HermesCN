@@ -164,12 +164,13 @@ def test_dist_asset_path_traversal_blocked(fake_dist):
 
 
 def test_shell_unavailable_when_dist_absent(no_dist):
-    """With frontend/dist hidden and static/ retired, GET / returns the
-    503 shell-unavailable page (the backend never renders a bare 404)."""
+    """With frontend/dist hidden and static/ retired, GET / returns a precise
+    "frontend not built" error (never a bare 404 or the old restart placeholder)."""
     handler = _get("/")
     assert handler.status == 503
     body = bytes(handler.body).decode("utf-8")
-    assert "Hermes is restarting" in body  # _SHELL_ERROR_HTML marker
+    assert "Frontend is not built" in body  # _FRONTEND_MISSING_HTML marker
+    assert "pnpm build" in body  # actionable build instructions
 
     missing = _get("/assets/app.js")
     assert missing.status == 404

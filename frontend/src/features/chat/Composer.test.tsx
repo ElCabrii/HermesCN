@@ -11,6 +11,7 @@ import {
   uploadFile,
 } from '@/api/chat'
 import { getModels } from '@/api/models'
+import { getSettings } from '@/api/panels'
 import { openChatStream } from '@/api/sse'
 import { toast } from 'sonner'
 import {
@@ -25,6 +26,11 @@ import {
 } from './chatStore'
 import { Composer } from './Composer'
 import type { SpeechRecognitionLike } from './mic'
+
+vi.mock('@/api/panels', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/panels')>()
+  return { ...actual, getSettings: vi.fn().mockResolvedValue({}), updateSettings: vi.fn().mockResolvedValue({}) }
+})
 
 vi.mock('@/api/client', () => ({ api: vi.fn() }))
 vi.mock('@/api/chat', () => ({
@@ -67,6 +73,9 @@ class FakeRecognition {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  // clearAllMocks wipes calls but keeps implementations, so a test that pins a
+  // send key would otherwise leak it into every test after it.
+  vi.mocked(getSettings).mockResolvedValue({})
   FakeRecognition.last = null
   chatStore.set(sessionAtom, sessionA)
   chatStore.set(messagesAtom, [])
@@ -116,7 +125,7 @@ describe('Composer — layout and guards', () => {
     expect(mic).toBeDisabled()
     expect(mic.getAttribute('title')).toMatch(/unavailable/i)
     expect(screen.getByRole('button', { name: 'Select model' })).toBeInTheDocument()
-    expect(screen.getByTitle('Context usage unknown')).toBeInTheDocument()
+    expect(screen.getByTitle(/Context usage unknown/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled()
   })
 
@@ -132,6 +141,38 @@ describe('Composer — layout and guards', () => {
     )
     expect(chatStore.get(busyAtom)).toBe(true)
     expect(messageBox()).toHaveValue('')
+  })
+
+  it('honours a ctrl+enter send key: Enter adds a newline, ⌘/Ctrl-Enter sends', async () => {
+    // The setting has always been offered in Settings; the composer used to
+    // ignore it and fire off half-written drafts on Enter.
+    vi.mocked(getSettings).mockResolvedValue({ send_key: 'ctrl+enter' })
+    const user = userEvent.setup()
+    renderComposer()
+    await waitFor(() => expect(getSettings).toHaveBeenCalled())
+
+    await user.type(messageBox(), 'first')
+    await user.keyboard('{Enter}')
+    await user.type(messageBox(), 'second')
+    expect(startChat).not.toHaveBeenCalled()
+    expect(messageBox()).toHaveValue('first\nsecond')
+
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    await waitFor(() =>
+      expect(startChat).toHaveBeenCalledWith(
+        expect.objectContaining({ message: 'first\nsecond' }),
+      ),
+    )
+  })
+
+  it('accepts ⌘/Ctrl-Enter under the default Enter send key too', async () => {
+    const user = userEvent.setup()
+    renderComposer()
+    await user.type(messageBox(), 'hello')
+    await user.keyboard('{Control>}{Enter}{/Control}')
+    await waitFor(() =>
+      expect(startChat).toHaveBeenCalledWith(expect.objectContaining({ message: 'hello' })),
+    )
   })
 
   it('does not send when the composer is empty', async () => {
@@ -406,14 +447,15 @@ describe('Composer — context usage badge', () => {
   it('shows the used context percentage from the session', () => {
     chatStore.set(sessionAtom, { ...sessionA, context_length: 10000, last_prompt_tokens: 2500 })
     renderComposer()
-    expect(screen.getByTitle('Context: 25% used')).toBeInTheDocument()
+    // The ring's tooltip carries the absolute figures alongside the percentage.
+    expect(screen.getByTitle('Context: 25% used — 2,500 of 10,000 tokens')).toBeInTheDocument()
     expect(screen.getByTestId('context-usage')).toHaveAttribute('data-context-pct', '25')
   })
 
   it('shows an unknown marker without a session context window', () => {
     renderComposer()
     expect(screen.getByTestId('context-usage')).not.toHaveAttribute('data-context-pct')
-    expect(screen.getByTitle('Context usage unknown')).toBeInTheDocument()
+    expect(screen.getByTitle(/Context usage unknown/)).toBeInTheDocument()
   })
 })
 

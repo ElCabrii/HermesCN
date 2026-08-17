@@ -149,6 +149,62 @@ describe('LoginPage', () => {
     expect(await screen.findByRole('button', { name: /sign in with passkey/i })).toBeInTheDocument()
   })
 
+  it('runs the WebAuthn ceremony and redirects on a successful passkey login', async () => {
+    vi.stubGlobal('location', { search: '', assign: vi.fn() })
+    const assign = vi.fn()
+    vi.stubGlobal('location', { search: '', assign })
+    // Mock the WebAuthn API: options fetch, credentials.get, then login POST.
+    const get = vi.fn().mockResolvedValue({
+      id: 'cred-id',
+      rawId: new Uint8Array([1, 2, 3]),
+      type: 'public-key',
+      response: {
+        authenticatorData: new Uint8Array([4]),
+        clientDataJSON: new Uint8Array([5]),
+        signature: new Uint8Array([6]),
+        userHandle: new Uint8Array([7]),
+      },
+    })
+    vi.stubGlobal('PublicKeyCredential', {})
+    vi.stubGlobal('navigator', { credentials: { get } })
+    mockFetch({
+      '/api/auth/status': okJson(makeStatus({ passkeys_enabled: true, passkeys_count: 1 })),
+      '/api/auth/passkey/options': okJson({
+        ok: true,
+        publicKey: { challenge: 'AQID', rpId: 'localhost', timeout: 60000 },
+      }),
+      '/api/auth/passkey/login': okJson({ ok: true }),
+      ...okRoutes,
+    })
+    render(<LoginPage />)
+
+    const btn = await screen.findByRole('button', { name: /sign in with passkey/i })
+    await userEvent.click(btn)
+
+    await waitFor(() => expect(assign).toHaveBeenCalledWith('./'))
+    expect(get).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows an error when the passkey ceremony is cancelled', async () => {
+    vi.stubGlobal('location', { search: '', assign: vi.fn() })
+    vi.stubGlobal('PublicKeyCredential', {})
+    vi.stubGlobal('navigator', { credentials: { get: vi.fn().mockResolvedValue(null) } })
+    mockFetch({
+      '/api/auth/status': okJson(makeStatus({ passkeys_enabled: true, passkeys_count: 1 })),
+      '/api/auth/passkey/options': okJson({
+        ok: true,
+        publicKey: { challenge: 'AQID', rpId: 'localhost' },
+      }),
+      ...okRoutes,
+    })
+    render(<LoginPage />)
+
+    const btn = await screen.findByRole('button', { name: /sign in with passkey/i })
+    await userEvent.click(btn)
+
+    expect(await screen.findByText(/passkey sign-in cancelled/i)).toBeInTheDocument()
+  })
+
   it('disables the form, retries every 3s, and reloads once the server is back', async () => {
     vi.useFakeTimers()
     const reload = vi.fn()

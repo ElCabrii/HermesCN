@@ -43,11 +43,13 @@ import urllib.error
 PORT = int(os.getenv("SMOKE_PORT", "8796"))
 BASE = f"http://127.0.0.1:{PORT}"
 
-# Pages that must load cleanly. Hash routes are how the SPA exposes views.
+# Pages that must load cleanly. The React app uses real routes (not hash
+# routes); the app shell must be the real React app, never the 503
+# "Frontend is not built" placeholder.
 PAGES = [
     "/",
-    "/#settings",
-    "/#sessions",
+    "/login",
+    "/session/does-not-exist",
 ]
 
 # Known-benign console noise (extend deliberately, each with a reason). Every
@@ -144,6 +146,12 @@ def main():
                 except Exception:
                     pass
                 time.sleep(1.5)
+
+                # The app shell must be the real React app — a 503 "Frontend is
+                # not built" placeholder is a setup failure, not a healthy page.
+                body_text = page.inner_text("body") if page.query_selector("body") else ""
+                if "Frontend is not built" in body_text or "Hermes is restarting" in body_text:
+                    failures.append(f"  [{path}] served the 503 placeholder instead of the React app")
 
                 meaningful = [(kind, txt) for (kind, txt) in errors if not _is_benign(txt)]
                 if meaningful:

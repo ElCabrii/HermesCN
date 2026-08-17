@@ -380,7 +380,6 @@ def _latest_cron_session_info_for_jobs(
         return {jid: {"session_id": "", "message_count": None} for jid in requested}
 
 
-
 def _session_field(session, field, default=None):
     if isinstance(session, dict):
         return session.get(field, default)
@@ -1414,8 +1413,6 @@ def _cron_output_content_window(text: str, limit: int = _CRON_OUTPUT_CONTENT_LIM
     return text[-limit:]
 
 
-
-
 def _cron_job_for_api(job: dict) -> dict:
     """Return a cron job payload with optional UI settings normalized.
 
@@ -1943,6 +1940,7 @@ def _session_list_cache_key(
     visible_only: bool = False,
     show_webhook_sessions: bool = False,
     show_kanban_sessions: bool = False,
+    show_subagent_sessions: bool = False,
     source_filter: str | None = None,
     sidebar_source: str | None = None,
     archived_limit: int | None = None,
@@ -1960,6 +1958,7 @@ def _session_list_cache_key(
         visible_only=visible_only,
         show_webhook_sessions=show_webhook_sessions,
         show_kanban_sessions=show_kanban_sessions,
+        show_subagent_sessions=show_subagent_sessions,
         source_filter=source_filter,
         sidebar_source=sidebar_source,
         archived_limit=archived_limit,
@@ -2206,6 +2205,7 @@ def _build_session_list_cache_payload(
     visible_only: bool = False,
     show_webhook_sessions: bool = False,
     show_kanban_sessions: bool = False,
+    show_subagent_sessions: bool = False,
     source_filter: str | None = None,
     sidebar_source: str | None = None,
     archived_limit: int | None = None,
@@ -2258,6 +2258,7 @@ def _build_session_list_cache_payload(
     show_cron_sessions = bool(show_cron_sessions)
     show_webhook_sessions = bool(show_webhook_sessions)
     show_kanban_sessions = bool(show_kanban_sessions)
+    show_subagent_sessions = bool(show_subagent_sessions)
     webui_sessions = [_normalize_sidebar_source_flags(s) for s in webui_sessions]
     if show_cli_sessions:
         diag_stage("get_cli_sessions")
@@ -2405,6 +2406,7 @@ def _build_session_list_cache_payload(
             show_cron_sessions=show_cron_sessions,
             show_webhook_sessions=show_webhook_sessions,
             show_kanban_sessions=show_kanban_sessions,
+            show_subagent_sessions=show_subagent_sessions,
             source_filter=source_filter,
         )
     else:
@@ -2580,6 +2582,7 @@ def _build_session_list_cache_payload(
             "show_claude_code_sessions": show_claude_code_sessions if show_cli_sessions else False,
             "show_webhook_sessions": show_webhook_sessions,
             "show_kanban_sessions": show_kanban_sessions,
+            "show_subagent_sessions": show_subagent_sessions,
         },
     }
 
@@ -6952,7 +6955,6 @@ def _context_length_lookup_inputs_for_model(
     )
 
 
-
 def _should_attach_codex_provider_context(model: str, raw_active_provider: str, catalog: dict) -> bool:
     """Return True when a bare Codex model needs separate provider context.
 
@@ -9108,7 +9110,6 @@ def _merged_session_messages_for_display(session, cli_messages=None) -> list:
     return sidecar_messages
 
 
-
 def _merged_webui_lineage_messages_for_display(session, messages=None) -> list:
     """Include immediate parent-only rows when a WebUI continuation sidecar is partial.
 
@@ -9415,6 +9416,7 @@ def _dedupe_cli_sidebar_sessions_for_api(
     show_cron_sessions: bool = False,
     show_webhook_sessions: bool = False,
     show_kanban_sessions: bool = False,
+    show_subagent_sessions: bool = False,
     source_filter: str | None = None,
 ) -> list[dict]:
     """Return state sidebar rows while preserving project-hidden background rows.
@@ -9442,6 +9444,8 @@ def _dedupe_cli_sidebar_sessions_for_api(
         show_webhook_sessions = True
     elif _sf == 'kanban':
         show_kanban_sessions = True
+    elif _sf == 'subagent':
+        show_subagent_sessions = True
 
     candidates = [
         s for s in cli
@@ -9456,6 +9460,7 @@ def _dedupe_cli_sidebar_sessions_for_api(
             show_cron=show_cron_sessions,
             show_webhook=show_webhook_sessions,
             show_kanban=show_kanban_sessions,
+            show_subagent=show_subagent_sessions,
         )
     ]
     return _include_project_hidden_background_sidebar_sessions(candidates, visible)
@@ -10103,229 +10108,6 @@ def _redact_sidebar_title_fields(item: dict, redact_enabled: bool | None = None)
             item[field] = _redact_text(value, _enabled=redact_enabled)
 
 
-# ── Login page locale strings ─────────────────────────────────────────────────
-# Add entries here to support more languages on the login page.
-# The key must match the 'language' setting value (from static/i18n.js LOCALES).
-_LOGIN_LOCALE = {
-    "en": {
-        "lang": "en",
-        "title": "Sign in",
-        "subtitle": "Enter your password to continue",
-        "placeholder": "Password",
-        "btn": "Sign in",
-        "invalid_pw": "Invalid password",
-        "conn_failed": "Connection failed",
-    },
-    "fr": {
-        "lang": "fr-FR",
-        "title": "Se connecter",
-        "subtitle": "Entrez votre mot de passe pour continuer",
-        "placeholder": "Mot de passe",
-        "btn": "Se connecter",
-        "invalid_pw": "Mot de passe invalide",
-        "conn_failed": "\u00c9chec de la connexion",
-    },
-    "es": {
-        "lang": "es-ES",
-        "title": "Iniciar sesi\u00f3n",
-        "subtitle": "Introduce tu contrase\u00f1a para continuar",
-        "placeholder": "Contrase\u00f1a",
-        "btn": "Entrar",
-        "invalid_pw": "Contrase\u00f1a inv\u00e1lida",
-        "conn_failed": "Error de conexi\u00f3n",
-    },
-    "de": {
-        "lang": "de-DE",
-        "title": "Anmelden",
-        "subtitle": "Geben Sie Ihr Passwort ein, um fortzufahren",
-        "placeholder": "Passwort",
-        "btn": "Anmelden",
-        "invalid_pw": "Ung\u00fcltiges Passwort",
-        "conn_failed": "Verbindung fehlgeschlagen",
-    },
-    "ru": {
-        "lang": "ru-RU",
-        "title": "\u0412\u043e\u0439\u0442\u0438",
-        "subtitle": "\u0412\u0432\u0435\u0434\u0438\u0442\u0435 \u043f\u0430\u0440\u043e\u043b\u044c, \u0447\u0442\u043e\u0431\u044b \u043f\u0440\u043e\u0434\u043e\u043b\u0436\u0438\u0442\u044c",
-        "placeholder": "\u041f\u0430\u0440\u043e\u043b\u044c",
-        "btn": "\u0412\u043e\u0439\u0442\u0438",
-        "invalid_pw": "\u041d\u0435\u0432\u0435\u0440\u043d\u044b\u0439 \u043f\u0430\u0440\u043e\u043b\u044c",
-        "conn_failed": "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u043e\u0434\u043a\u043b\u044e\u0447\u0438\u0442\u044c\u0441\u044f",
-    },
-    "zh": {
-        "lang": "zh-CN",
-        "title": "\u767b\u5f55",
-        "subtitle": "\u8f93\u5165\u5bc6\u7801\u7ee7\u7eed\u4f7f\u7528",
-        "placeholder": "\u5bc6\u7801",
-        "btn": "\u767b\u5f55",
-        "invalid_pw": "\u5bc6\u7801\u9519\u8bef",
-        "conn_failed": "\u8fde\u63a5\u5931\u8d25",
-    },
-    "zh-Hant": {
-        "lang": "zh-TW",
-        "title": "\u767b\u5f55",
-        "subtitle": "\u8f38\u5165\u5bc6\u78bc\u7e7c\u7e8c\u4f7f\u7528",
-        "placeholder": "\u5bc6\u78bc",
-        "btn": "\u767b\u5f55",
-        "invalid_pw": "\u5bc6\u78bc\u932f\u8aa4",
-        "conn_failed": "\u9023\u63a5\u5931\u6557",
-    },
-    # Strings mirror static/i18n.js login_* keys for the corresponding locale.
-    # See issue #1442. When adding a new locale to LOCALES in i18n.js, also add
-    # the matching entry here — tests/test_login_locale_parity.py enforces this.
-    "it": {
-        "lang": "it-IT",
-        "title": "Accedi",
-        "subtitle": "Inserisci la password per continuare",
-        "placeholder": "Password",
-        "btn": "Accedi",
-        "invalid_pw": "Password non valida",
-        "conn_failed": "Connessione fallita",
-    },
-    "ja": {
-        "lang": "ja-JP",
-        "title": "\u30b5\u30a4\u30f3\u30a4\u30f3",
-        "subtitle": "\u30d1\u30b9\u30ef\u30fc\u30c9\u3092\u5165\u529b\u3057\u3066\u7d9a\u884c",
-        "placeholder": "\u30d1\u30b9\u30ef\u30fc\u30c9",
-        "btn": "\u30b5\u30a4\u30f3\u30a4\u30f3",
-        "invalid_pw": "\u30d1\u30b9\u30ef\u30fc\u30c9\u304c\u7121\u52b9\u3067\u3059",
-        "conn_failed": "\u63a5\u7d9a\u5931\u6557",
-    },
-    "pt": {
-        "lang": "pt-BR",
-        "title": "Entrar",
-        "subtitle": "Digite sua senha para continuar",
-        "placeholder": "Senha",
-        "btn": "Entrar",
-        "invalid_pw": "Senha inv\u00e1lida",
-        "conn_failed": "Falha na conex\u00e3o",
-    },
-    "ko": {
-        "lang": "ko-KR",
-        "title": "\ub85c\uadf8\uc778",
-        "subtitle": "\uacc4\uc18d\ud558\ub824\uba74 \ube44\ubc00\ubc88\ud638\ub97c \uc785\ub825\ud558\uc138\uc694",
-        "placeholder": "\ube44\ubc00\ubc88\ud638",
-        "btn": "\ub85c\uadf8\uc778",
-        "invalid_pw": "\ube44\ubc00\ubc88\ud638\uac00 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4",
-        "conn_failed": "\uc5f0\uacb0 \uc2e4\ud328",
-    },
-    "tr": {
-        "lang": "tr-TR",
-        "title": "Oturum a\u00e7",
-        "subtitle": "Devam etmek i\u00e7in \u015fifrenizi girin",
-        "placeholder": "\u015eifre",
-        "btn": "Oturum a\u00e7",
-        "invalid_pw": "Ge\u00e7ersiz \u015fifre",
-        "conn_failed": "Ba\u011flant\u0131 ba\u015far\u0131s\u0131z",
-    },
-    "pl": {
-        "lang": "pl-PL",
-        "title": "Zaloguj si\u0119",
-        "subtitle": "Wpisz has\u0142o, aby kontynuowa\u0107",
-        "placeholder": "Has\u0142o",
-        "btn": "Zaloguj si\u0119",
-        "invalid_pw": "Nieprawid\u0142owe has\u0142o",
-        "conn_failed": "Po\u0142\u0105czenie nie powiod\u0142o si\u0119",
-    },
-    "vi": {
-        "lang": "vi",
-        "title": "\u0110\u0103ng nh\u1eadp",
-        "subtitle": "Nh\u1eadp m\u1eadt kh\u1ea9u c\u1ee7a b\u1ea1n \u0111\u1ec3 ti\u1ebfp t\u1ee5c",
-        "placeholder": "M\u1eadt kh\u1ea9u",
-        "btn": "\u0110\u0103ng nh\u1eadp",
-        "invalid_pw": "M\u1eadt kh\u1ea9u kh\u00f4ng h\u1ee3p l\u1ec7",
-        "conn_failed": "K\u1ebft n\u1ed1i th\u1ea5t b\u1ea1i",
-    },
-    "cs": {
-        "lang": "cs-CZ",
-        "title": "P\u0159ihl\u00e1sit se",
-        "subtitle": "Zadejte heslo pro pokra\u010dov\u00e1n\u00ed",
-        "placeholder": "Heslo",
-        "btn": "P\u0159ihl\u00e1sit se",
-        "invalid_pw": "Neplatn\u00e9 heslo",
-        "conn_failed": "P\u0159ipojen\u00ed selhalo",
-    },
-}
-
-
-def _resolve_login_locale_key(raw_lang: str | None) -> str:
-    """Resolve settings.language to a known _LOGIN_LOCALE key."""
-    if not raw_lang:
-        return "en"
-    lang = str(raw_lang).strip()
-    if not lang:
-        return "en"
-    if lang in _LOGIN_LOCALE:
-        return lang
-
-    normalized = lang.replace("_", "-")
-    lower = normalized.lower()
-
-    # Case-insensitive direct key match first.
-    for key in _LOGIN_LOCALE:
-        if key.lower() == lower:
-            return key
-
-    # Common Chinese aliases.
-    if lower == "zh" or lower.startswith("zh-cn") or lower.startswith("zh-sg") or lower.startswith("zh-hans"):
-        return "zh"
-    if lower.startswith("zh-tw") or lower.startswith("zh-hk") or lower.startswith("zh-mo") or lower.startswith("zh-hant"):
-        return "zh-Hant" if "zh-Hant" in _LOGIN_LOCALE else "zh"
-
-    # Fallback to base language subtag (e.g. en-US -> en).
-    base = lower.split("-", 1)[0]
-    for key in _LOGIN_LOCALE:
-        if key.lower() == base:
-            return key
-    return "en"
-
-# ── Login page (self-contained, no external deps) ────────────────────────────
-_LOGIN_PAGE_HTML = """<!doctype html>
-<html lang="{{LANG}}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{{BOT_NAME}} — {{LOGIN_TITLE}}</title>
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:#1a1a2e;color:#e8e8f0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
-  height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:#16213e;border:1px solid rgba(255,255,255,.08);border-radius:16px;padding:36px 32px;
-  width:320px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.3)}
-.logo{width:48px;height:48px;border-radius:12px;background:linear-gradient(145deg,#e8a030,#e94560);
-  display:flex;align-items:center;justify-content:center;font-weight:800;font-size:20px;color:#fff;
-  margin:0 auto 12px;box-shadow:0 2px 12px rgba(233,69,96,.3)}
-h1{font-size:18px;font-weight:600;margin-bottom:4px}
-.sub{font-size:12px;color:#8888aa;margin-bottom:24px}
-input{width:100%;padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.1);
-  background:rgba(255,255,255,.04);color:#e8e8f0;font-size:14px;outline:none;margin-bottom:14px;
-  transition:border-color .15s}
-input:focus{border-color:rgba(124,185,255,.5);box-shadow:0 0 0 3px rgba(124,185,255,.1)}
-button{width:100%;padding:10px;border-radius:10px;border:none;background:rgba(124,185,255,.15);
-  border:1px solid rgba(124,185,255,.3);color:#7cb9ff;font-size:14px;font-weight:600;cursor:pointer;
-  transition:all .15s}
-button:hover{background:rgba(124,185,255,.25)}
-.oidc-login{display:block;margin-top:10px;padding:10px;border-radius:10px;text-decoration:none;
-  background:rgba(255,255,255,.04);border:1px solid rgba(111,214,164,.35);color:#6fd6a4;
-  font-size:14px;font-weight:600;cursor:pointer;transition:all .15s}
-.oidc-login:hover{background:rgba(111,214,164,.12)}
-.passkey-login{margin-top:10px;background:rgba(255,255,255,.04);border-color:rgba(232,160,48,.35);color:#e8a030}
-.err{color:#e94560;font-size:12px;margin-top:10px;display:none}
-</style></head><body>
-<div class="card">
-  <div class="logo">{{BOT_NAME_INITIAL}}</div>
-  <h1>{{BOT_NAME}}</h1>
-  <p class="sub">{{LOGIN_SUBTITLE}}</p>
-  <form id="login-form" data-invalid-pw="{{LOGIN_INVALID_PW}}" data-conn-failed="{{LOGIN_CONN_FAILED}}">
-    <input type="password" id="pw" placeholder="{{LOGIN_PLACEHOLDER}}" autofocus>
-    <button type="submit">{{LOGIN_BTN}}</button>
-    <button type="button" id="passkey-login" class="passkey-login" style="display:none">Sign in with passkey</button>
-    {{OIDC_LOGIN_HTML}}
-  </form>
-  <div class="err" id="err"></div>
-</div>
-<!-- Keep login.js relative so subpath mounts load it under the current scope. -->
-<script src="static/login.js?v={{WEBUI_VERSION}}"></script>
-</body></html>"""
-
-
 def _safe_login_redirect_path(raw_path: str | None) -> str:
     path = str(raw_path or "").strip()
     if not path:
@@ -10376,25 +10158,6 @@ def _request_base_url(handler) -> str:
     scheme = "https" if _is_secure_context(handler) else "http"
     host = str(handler.headers.get("Host") or "").strip() or "127.0.0.1:8787"
     return f"{scheme}://{host}"
-
-
-def _oidc_login_html(parsed) -> str:
-    try:
-        from api.auth_oidc import is_oidc_enabled
-    except Exception:
-        return ""
-    if not is_oidc_enabled():
-        return ""
-    next_path = _safe_login_redirect_path(
-        parse_qs(parsed.query or "").get("next", [""])[0]
-    )
-    href = "/api/auth/oidc/start"
-    if next_path != "/":
-        href += "?next=" + quote(next_path, safe="/")
-    return (
-        '<a id="oidc-login" class="oidc-login" '
-        f'href="{_html.escape(href, quote=True)}">Continue with SSO</a>'
-    )
 
 
 # ── Logs endpoint ─────────────────────────────────────────────────────────────
@@ -12027,6 +11790,46 @@ _SHELL_ERROR_HTML = """<!doctype html>
 </html>"""
 
 
+_FRONTEND_MISSING_HTML = """<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\">
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">
+  <title>Frontend not built</title>
+</head>
+<body style=\"margin:0;padding:2rem;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#111827;color:#e5e7eb;\">
+  <main style=\"max-width:40rem;margin:10vh auto;line-height:1.5;\">
+    <h1 style=\"font-size:1.5rem;margin:0 0 0.75rem;\">Frontend is not built</h1>
+    <p style=\"margin:0 0 1rem;color:#cbd5e1;\">The React application has not been built for this installation. This is a setup error, not a server restart.</p>
+    <pre style=\"background:#1f2937;padding:1rem;border-radius:0.5rem;overflow:auto;color:#e5e7eb;\">cd frontend
+pnpm install --frozen-lockfile
+pnpm build</pre>
+    <p style=\"margin:1rem 0 0;color:#cbd5e1;\">Docker and release builds produce these assets automatically. A source checkout must build them explicitly.</p>
+  </main>
+</body>
+</html>"""
+
+
+def _serve_frontend_missing(handler) -> bool:
+    """Return a precise actionable error when the React frontend is not built.
+
+    Replaces the old 503 "Hermes is restarting" placeholder for the missing-
+    build case so a clean checkout or broken release fails loudly and clearly
+    instead of masquerading as a transient restart.
+    """
+    logger.warning(
+        "React frontend not built: %s does not exist. Run `cd frontend && pnpm install --frozen-lockfile && pnpm build`.",
+        api_config.get_dist_root(),
+    )
+    t(
+        handler,
+        _FRONTEND_MISSING_HTML,
+        status=503,
+        content_type="text/html; charset=utf-8",
+    )
+    return True
+
+
 def _serve_shell_unavailable(handler, exc: Exception) -> bool:
     """Return HTML for shell-route failures so `/` never renders JSON."""
     logger.warning("Failed to serve WebUI shell route: %s", exc)
@@ -12110,15 +11913,18 @@ def _handle_health_restart(handler) -> bool:
 
 
 def _serve_manifest(handler) -> bool:
-    """Serve static/manifest.json with the correct PWA Content-Type.
+    """Serve manifest.json with the correct PWA Content-Type.
 
     Shared by the root (/manifest.json, /manifest.webmanifest) and
     session-prefixed (/session/manifest.json, /session/manifest.webmanifest)
     routes so Firefox Android can fetch the manifest when installing from
     a /session/<id> page.  See #2226.
+
+    Serves from the active web root (frontend/dist/ when built, static/
+    otherwise) so a dist-only deployment still serves the PWA manifest.
     """
-    static_root = api_config.get_static_root()
-    manifest_path = (static_root / "manifest.json").resolve()
+    web_root = api_config.get_web_root()
+    manifest_path = (web_root / "manifest.json").resolve()
     if manifest_path.exists():
         data = manifest_path.read_bytes()
         handler.send_response(200)
@@ -12222,7 +12028,16 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path in ("/session/manifest.json", "/session/manifest.webmanifest"):
         return _serve_manifest(handler)
 
-    if parsed.path in ("/", "/index.html") or parsed.path.startswith("/session/"):
+    if parsed.path in ("/", "/index.html", "/login") or parsed.path.startswith("/session/"):
+        # The React frontend must be built before the app can be served. A
+        # missing build is a setup error, not a transient restart — surface a
+        # precise actionable message instead of the 503 restart placeholder so
+        # a clean checkout / broken release can never masquerade as healthy.
+        # /login is served here too: the React app owns the login surface
+        # (LoginPage.tsx) and the SPA router renders it client-side; the legacy
+        # static/login.js page was removed with the static/ tree.
+        if not api_config.get_dist_root().exists():
+            return _serve_frontend_missing(handler)
         try:
             from api.extensions import inject_extension_tags
 
@@ -12263,35 +12078,6 @@ def handle_get(handler, parsed) -> bool:
                 "X-Robots-Tag": "noindex, nofollow",
             },
         )
-
-    if parsed.path == "/login":
-        _settings = load_settings()
-        _bn = _html.escape(_settings.get("bot_name") or "Hermes")
-        _lang = _settings.get("language", "en")
-        _login_strings = _LOGIN_LOCALE[
-            _resolve_login_locale_key(_lang)
-        ]
-        from urllib.parse import quote
-        from api.updates import WEBUI_VERSION
-        version_token = quote(WEBUI_VERSION, safe="")
-        _page = (
-            _LOGIN_PAGE_HTML.replace("{{BOT_NAME}}", _bn)
-            .replace("{{BOT_NAME_INITIAL}}", _bn[0].upper())
-            .replace("{{WEBUI_VERSION}}", version_token)
-            .replace("{{LANG}}", _html.escape(_login_strings["lang"]))
-            .replace("{{LOGIN_TITLE}}", _html.escape(_login_strings["title"]))
-            .replace("{{LOGIN_SUBTITLE}}", _html.escape(_login_strings["subtitle"]))
-            .replace(
-                "{{LOGIN_PLACEHOLDER}}", _html.escape(_login_strings["placeholder"])
-            )
-            .replace("{{LOGIN_BTN}}", _html.escape(_login_strings["btn"]))
-            .replace("{{LOGIN_INVALID_PW}}", _html.escape(_login_strings["invalid_pw"]))
-            .replace(
-                "{{LOGIN_CONN_FAILED}}", _html.escape(_login_strings["conn_failed"])
-            )
-            .replace("{{OIDC_LOGIN_HTML}}", _oidc_login_html(parsed))
-        )
-        return t(handler, _page, content_type="text/html; charset=utf-8")
 
     if parsed.path == "/api/auth/oidc/start":
         from api.auth_oidc import OIDCAuthError, OIDCConfigError, build_authorization_redirect
@@ -12407,8 +12193,8 @@ def handle_get(handler, parsed) -> bool:
         return _serve_manifest(handler)
 
     if parsed.path == "/sw.js":
-        static_root = api_config.get_static_root()
-        sw_path = (static_root / "sw.js").resolve()
+        web_root = api_config.get_web_root()
+        sw_path = (web_root / "sw.js").resolve()
         if sw_path.exists():
             # Inject the current git-derived version as the cache name so the
             # service worker cache busts automatically on every new deploy.
@@ -12430,8 +12216,8 @@ def handle_get(handler, parsed) -> bool:
         return j(handler, {"error": "not found"}, status=404)
 
     if parsed.path == "/favicon.ico":
-        static_root = api_config.get_static_root()
-        ico_path = (static_root / "favicon.ico").resolve()
+        web_root = api_config.get_web_root()
+        ico_path = (web_root / "favicon.ico").resolve()
         if ico_path.exists() and ico_path.is_file():
             data = ico_path.read_bytes()
             handler.send_response(200)
@@ -12442,6 +12228,37 @@ def handle_get(handler, parsed) -> bool:
             handler.wfile.write(data)
         else:
             handler.send_response(204)
+            handler.end_headers()
+        return True
+
+    # Root-level PWA assets referenced by index.html / manifest.json (favicon
+    # variants, apple-touch-icon, icons.svg). Served from the active web root
+    # (frontend/dist/ when built) so a dist-only deployment serves them too.
+    if parsed.path in (
+        "/favicon.svg",
+        "/favicon-32.png",
+        "/favicon-192.png",
+        "/favicon-512.png",
+        "/apple-touch-icon.png",
+        "/icons.svg",
+    ):
+        web_root = api_config.get_web_root()
+        asset_path = (web_root / parsed.path.lstrip("/")).resolve()
+        if asset_path.exists() and asset_path.is_file():
+            data = asset_path.read_bytes()
+            ct = {
+                ".svg": "image/svg+xml",
+                ".png": "image/png",
+                ".ico": "image/x-icon",
+            }.get(asset_path.suffix.lower(), "application/octet-stream")
+            handler.send_response(200)
+            handler.send_header("Content-Type", ct)
+            handler.send_header("Content-Length", str(len(data)))
+            handler.send_header("Cache-Control", "public, max-age=86400")
+            handler.end_headers()
+            handler.wfile.write(data)
+        else:
+            handler.send_response(404)
             handler.end_headers()
         return True
 
@@ -13355,6 +13172,7 @@ def handle_get(handler, parsed) -> bool:
             show_cron_sessions = bool(settings.get("show_cron_sessions"))
             show_webhook_sessions = bool(settings.get("show_webhook_sessions"))
             show_kanban_sessions = bool(settings.get("show_kanban_sessions"))
+            show_subagent_sessions = bool(settings.get("show_subagent_sessions"))
             agent_session_source_filter = settings.get("agent_session_source_filter")
             active_profile = profiles_api.get_active_profile_name()
             all_profiles = _all_profiles_enabled(parsed)
@@ -13379,6 +13197,7 @@ def handle_get(handler, parsed) -> bool:
                 visible_only=True,
                 show_webhook_sessions=show_webhook_sessions,
                 show_kanban_sessions=show_kanban_sessions,
+                show_subagent_sessions=show_subagent_sessions,
                 source_filter=agent_session_source_filter,
                 sidebar_source=sidebar_source,
                 archived_limit=archived_limit,
@@ -13402,6 +13221,7 @@ def handle_get(handler, parsed) -> bool:
                     visible_only=True,
                     show_webhook_sessions=show_webhook_sessions,
                     show_kanban_sessions=show_kanban_sessions,
+                    show_subagent_sessions=show_subagent_sessions,
                     source_filter=agent_session_source_filter,
                     sidebar_source=sidebar_source,
                     archived_limit=archived_limit,
@@ -16071,6 +15891,7 @@ def handle_post(handler, parsed) -> bool:
                 "show_cron_sessions",
                 "show_webhook_sessions",
                 "show_kanban_sessions",
+                "show_subagent_sessions",
                 "show_previous_messaging_sessions",
             )
         ):
@@ -17058,7 +16879,15 @@ def _serve_from_root(handler, parsed, root: Path, prefix: str):
 
 
 def _serve_static(handler, parsed):
-    return _serve_from_root(handler, parsed, api_config.get_static_root(), "/static/")
+    """Serve legacy /static/* paths.
+
+    The legacy static/ frontend tree was removed in the HermesCN remake; the
+    React app is served from /assets/ and root-level PWA files. Plugin and
+    extension static assets are served through their own routes (/extensions/,
+    serve_plugin_static), so /static/* now returns 404 rather than crashing on
+    a deleted directory.
+    """
+    return j(handler, {"error": "not found"}, status=404)
 
 
 def _serve_dist_assets(handler, parsed):
@@ -18673,7 +18502,6 @@ def _serve_file_bytes(handler, target: Path, mime: str, disposition: str, cache_
         return True
     finally:
         _close_fd_quietly(fd)
-
 
 
 def _normalize_tts_prosody(value, *, unit: str) -> str | None:
@@ -22995,7 +22823,6 @@ def _handle_chat_start(handler, body, diag=None):
     finally:
         if diag:
             diag.finish()
-
 
 
 def _resolve_chat_workspace_with_recovery(s, requested_workspace) -> str:

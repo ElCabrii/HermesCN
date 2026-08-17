@@ -69,6 +69,49 @@ workspaceStore.sub(workspacePanelWidthAtom, () => {
   }
 })
 
+// ── workspace:// deep-link requests ───────────────────────────────────────
+// Chat markdown links of the form `workspace://path/to/file` open the target
+// in this panel's preview pane (legacy contract: CHANGELOG #2881/#2938).
+// Because the panel mounts lazily (only while mode !== 'closed'), the request
+// is a consumable one-shot atom: requestOpenWorkspaceFile() opens the panel
+// (mode='preview') and drops the request; WorkspacePanel consumes it on mount
+// and via a subscription while mounted, so a click from a closed panel still
+// lands once the panel mounts.
+export interface OpenFileRequest {
+  /** Workspace-relative path to preview. */
+  path: string
+  /** Monotonic nonce so identical repeated requests still fire. */
+  nonce: number
+}
+
+export const openFileRequestAtom = atom<OpenFileRequest | null>(null)
+
+/** Open the workspace panel to `preview` and request a file open. */
+export function requestOpenWorkspaceFile(path: string): void {
+  workspaceStore.set(workspacePanelModeAtom, 'preview')
+  workspaceStore.set(openFileRequestAtom, { path, nonce: Date.now() })
+}
+
+/** Pop and clear the pending request (one-shot). Returns null if none. */
+export function consumeOpenFileRequest(): OpenFileRequest | null {
+  const v = workspaceStore.get(openFileRequestAtom)
+  if (v) workspaceStore.set(openFileRequestAtom, null)
+  return v
+}
+
+/** Parse a `workspace://path/to/file` href into a workspace-relative path. */
+export function parseWorkspaceHref(href: string): string | null {
+  if (!/^workspace:\/\//i.test(href)) return null
+  try {
+    const rel = decodeURIComponent(href.replace(/^workspace:\/\//i, ''))
+      .replace(/^~\//, '')
+      .replace(/^\.\//, '')
+    return rel || null
+  } catch {
+    return null
+  }
+}
+
 // ── file-kind classification (legacy static/workspace.js + static/ui.js) ──
 
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.bmp', '.avif'])

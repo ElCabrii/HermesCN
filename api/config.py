@@ -8567,8 +8567,15 @@ def _maybe_log_slow_stages(
 # ── Static file path ─────────────────────────────────────────────────────────
 
 
-def get_static_root() -> Path:
-    return REPO_ROOT / "static"
+def get_web_root() -> Path:
+    """Root of the served web frontend (the built React app, frontend/dist/).
+
+    The legacy static/ tree was removed in the HermesCN frontend remake; the
+    built React app is the only frontend. Callers must handle the case where
+    no build exists (get_dist_root().exists() is False) and surface a precise
+    "build the frontend" error rather than a restart placeholder.
+    """
+    return get_dist_root()
 
 
 def get_dist_root() -> Path:
@@ -8577,17 +8584,13 @@ def get_dist_root() -> Path:
 
 
 def get_index_html_path() -> Path:
-    """Path of the app-shell index.html.
+    """Path of the app-shell index.html (frontend/dist/index.html).
 
-    Prefers the built React frontend (frontend/dist/index.html) when a build
-    is present, falling back to the legacy static/index.html shell otherwise.
     Callers (e.g. _render_index_shell_base) key their caches on the returned
-    path, so switching between the two shells is picked up automatically.
+    path. When no build exists the path does not exist on disk; the shell route
+    must detect that and return a precise actionable error.
     """
-    dist_index = get_dist_root() / "index.html"
-    if dist_index.exists():
-        return dist_index
-    return get_static_root() / "index.html"
+    return get_dist_root() / "index.html"
 
 
 _INDEX_HTML_PATH = get_index_html_path()
@@ -9352,6 +9355,7 @@ _SETTINGS_DEFAULTS = {
     "show_cron_sessions": False,  # surface cron sessions in the sidebar (subordinate to show_cli_sessions)
     "show_webhook_sessions": False,  # surface webhook sessions in the sidebar (subordinate to show_cli_sessions)
     "show_kanban_sessions": False,  # surface kanban worker sessions in the sidebar (subordinate to show_cli_sessions)
+    "show_subagent_sessions": False,  # surface delegated subagent child sessions in the sidebar (subordinate to show_cli_sessions)
     "show_previous_messaging_sessions": False,  # show older Telegram/Discord/etc. reset segments
     "sync_to_insights": False,  # mirror WebUI token usage to state.db for /insights
     "check_for_updates": True,  # check if webui/agent repos are behind upstream
@@ -9697,6 +9701,7 @@ _SETTINGS_BOOL_KEYS = {
     "show_cron_sessions",
     "show_webhook_sessions",
     "show_kanban_sessions",
+    "show_subagent_sessions",
     "show_previous_messaging_sessions",
     "sync_to_insights",
     "check_for_updates",

@@ -8,6 +8,11 @@ import { cn } from '@/lib/utils'
  * Arguments and result snippets live behind an expansion; long content is
  * truncated with a "show more" toggle for full logs. Live (in-flight) and
  * settled calls share the same shape — `done: false` / missing means running.
+ *
+ * The row carries no surface of its own. It always renders inside the turn's
+ * activity disclosure, which already supplies the container, and giving each
+ * row a border plus a fill produced exactly the stack of nested rounded
+ * rectangles DESIGN.md tells us to avoid.
  */
 
 export type ToolStatus = 'running' | 'done' | 'error'
@@ -74,41 +79,51 @@ export function ToolCard({ call }: { call: ToolCall }) {
       data-tool-name={name}
       data-tool-status={status}
       data-collapsed={!open}
-      className="tool-row"
+      className="flex flex-col"
     >
       <button
         type="button"
-        className="tool-row-toggle"
+        className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-1.5 py-1.5 text-left font-sans transition-colors hover:bg-muted/60"
         aria-expanded={open}
         aria-label={`${name} details`}
         onClick={() => setOpen((o) => !o)}
       >
         <StatusIcon status={status} />
-        <span className="tool-name">{name}</span>
-        {preview !== '' && <span className="tool-preview">{preview}</span>}
+        <span className="shrink-0 font-mono text-[11px] font-medium text-foreground">{name}</span>
+        {preview !== '' && <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{preview}</span>}
+        <span className="flex-1" />
         {typeof call.duration === 'number' && (
-          <span className="tool-duration">{call.duration}s</span>
+          <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">{call.duration}s</span>
         )}
-        <ChevronDown className={cn('size-3.5 shrink-0 text-muted-foreground', open && 'rotate-180')} />
+        <ChevronDown
+          className={cn(
+            'size-3.5 shrink-0 text-muted-foreground transition-transform',
+            open && 'rotate-180',
+          )}
+        />
       </button>
       {open && (
-        <div className="tool-detail">
+        <div className="flex flex-col gap-1.5 px-1.5 pt-0.5 pb-2">
           {argsText !== '' && (
-            <div className="tool-section">
-              <div className="tool-section-label">Arguments</div>
-              <pre className="tool-code">{clip(argsText)}</pre>
+            <div className="flex flex-col gap-0.5">
+              <div className="text-[11px] font-semibold text-muted-foreground">Arguments</div>
+              <pre className="m-0 max-h-80 overflow-auto rounded-md bg-muted px-2 py-1.5 font-mono text-[11px] leading-[1.5] break-words whitespace-pre-wrap">
+                {clip(argsText)}
+              </pre>
             </div>
           )}
           {resultText !== '' && (
-            <div className="tool-section">
-              <div className="tool-section-label">Result</div>
-              <pre className="tool-code">{clip(resultText)}</pre>
+            <div className="flex flex-col gap-0.5">
+              <div className="text-[11px] font-semibold text-muted-foreground">Result</div>
+              <pre className="m-0 max-h-80 overflow-auto rounded-md bg-muted px-2 py-1.5 font-mono text-[11px] leading-[1.5] break-words whitespace-pre-wrap">
+                {clip(resultText)}
+              </pre>
             </div>
           )}
           {anyTruncated && (
             <button
               type="button"
-              className="tool-show-more"
+              className="cursor-pointer self-start p-0 text-[11px] text-accent underline underline-offset-2"
               onClick={() => setShowMore((s) => !s)}
             >
               {showMore ? 'show less' : 'show more'}

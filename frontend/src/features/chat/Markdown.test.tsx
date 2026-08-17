@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react'
+import { fireEvent } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Markdown } from './Markdown'
 
@@ -10,10 +11,32 @@ vi.mock('mermaid', () => ({
   default: { initialize: mermaidMock.initialize, render: mermaidMock.render },
 }))
 
+const workspaceLinkMock = vi.hoisted(() => ({ requestOpenWorkspaceFile: vi.fn() }))
+vi.mock('@/features/workspace/workspaceStore', async (importActual) => ({
+  ...(await importActual<typeof import('@/features/workspace/workspaceStore')>()),
+  requestOpenWorkspaceFile: workspaceLinkMock.requestOpenWorkspaceFile,
+}))
+
 describe('Markdown', () => {
   beforeEach(() => {
     mermaidMock.initialize.mockClear()
     mermaidMock.render.mockClear()
+  })
+
+  it('keeps conversation prose on the UI sans stack, not an editorial serif', () => {
+    // docs/UIUX-GUIDE.md: "Conversation prose must remain the system sans by
+    // default. Do not introduce a global conversation serif ... without
+    // explicit design approval plus code and test evidence." This is that
+    // evidence — the prose container shipped `font-serif` for a while.
+    const { container } = render(<Markdown content="a settled answer" prose />)
+    const prose = container.querySelector('[data-prose="true"]') as HTMLElement
+    expect(prose).not.toBeNull()
+    expect(prose.className).not.toMatch(/font-serif/)
+  })
+
+  it('offers a copy control on fenced code blocks', () => {
+    render(<Markdown content={'```sh\nhermes config set terminal.backend local\n```'} prose />)
+    expect(screen.getByRole('button', { name: 'Copy code' })).toBeInTheDocument()
   })
 
   it('renders bold and italic text', () => {
@@ -48,6 +71,23 @@ describe('Markdown', () => {
     expect(link).toHaveAttribute('href', 'https://example.com/docs')
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'))
+  })
+
+  it('intercepts workspace:// links and requests a preview open instead of navigating', () => {
+    workspaceLinkMock.requestOpenWorkspaceFile.mockClear()
+    render(<Markdown content="[report](workspace://docs/report.md)" />)
+    const link = screen.getByRole('link', { name: 'report' })
+    // Internal deep-link: must NOT open a new tab.
+    expect(link).not.toHaveAttribute('target', '_blank')
+    fireEvent.click(link)
+    expect(workspaceLinkMock.requestOpenWorkspaceFile).toHaveBeenCalledWith('docs/report.md')
+  })
+
+  it('strips ~​/ and ./ prefixes from workspace:// paths', () => {
+    workspaceLinkMock.requestOpenWorkspaceFile.mockClear()
+    render(<Markdown content="[f](workspace://~/src/a.ts)" />)
+    fireEvent.click(screen.getByRole('link', { name: 'f' }))
+    expect(workspaceLinkMock.requestOpenWorkspaceFile).toHaveBeenCalledWith('src/a.ts')
   })
 
   it('fails closed on raw script HTML — no script tag, no script text', () => {

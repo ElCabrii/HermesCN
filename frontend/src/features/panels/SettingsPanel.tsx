@@ -1,10 +1,151 @@
-import { useEffect, useState } from 'react'
-import { Loader2Icon } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { KeyRoundIcon, Loader2Icon, Trash2Icon } from 'lucide-react'
 import { toast } from 'sonner'
 import { getModels, type CatalogModel } from '@/api/models'
+import {
+  b64uToBytes,
+  bytesToB64u,
+  getPasskeyRegisterOptions,
+  listPasskeys,
+  passkeyDelete,
+  passkeyRegister,
+} from '@/api/auth'
 import { getSettings, updateSettings, type Settings } from '@/api/panels'
 import { getWorkspaces } from '@/api/workspace'
+import { UpdatesSection } from './UpdatesSection'
 import { Button } from '@/components/ui/button'
+import { NativeSelect } from '@/components/ui/native-select'
+
+interface PasskeyCredential {
+  id: string
+  name?: string
+  created_at?: number
+  [key: string]: unknown
+}
+
+/**
+ * Passkey management (WebAuthn). Lists registered credentials and supports
+ * registering a new one (navigator.credentials.create) and deleting one.
+ * The ceremony mirrors the login flow: b64u<->bytes conversion around the
+ * backend's options/attestation payloads.
+ */
+function PasskeyManager() {
+  const [credentials, setCredentials] = useState<PasskeyCredential[]>([])
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+
+  const refresh = async () => {
+    try {
+      const data = await listPasskeys()
+      setCredentials((data.credentials ?? []) as PasskeyCredential[])
+    } catch {
+      setCredentials([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refresh()
+  }, [])
+
+  const register = async () => {
+    if (!window.PublicKeyCredential || !navigator.credentials) {
+      toast.error('WebAuthn is not supported in this browser.')
+      return
+    }
+    setBusy(true)
+    try {
+      const pk = await getPasskeyRegisterOptions()
+      const publicKey: PublicKeyCredentialCreationOptions = {
+        ...(pk as unknown as PublicKeyCredentialCreationOptions),
+        challenge: b64uToBytes(String(pk.challenge)),
+        user: {
+          ...(pk.user as PublicKeyCredentialUserEntity),
+          id: b64uToBytes(String((pk.user as { id?: string })?.id ?? '')),
+        },
+        excludeCredentials: Array.isArray(pk.excludeCredentials)
+          ? (pk.excludeCredentials as { id: string; type: string }[]).map((c) => ({
+              ...c,
+              type: 'public-key' as const,
+              id: b64uToBytes(c.id),
+            }))
+          : undefined,
+      }
+      const cred = (await navigator.credentials.create({ publicKey })) as PublicKeyCredential | null
+      if (!cred) throw new Error('Passkey registration cancelled')
+      const response = cred.response as AuthenticatorAttestationResponse
+      const payload = {
+        id: cred.id,
+        rawId: bytesToB64u(cred.rawId),
+        type: cred.type,
+        response: {
+          attestationObject: bytesToB64u(response.attestationObject),
+          clientDataJSON: bytesToB64u(response.clientDataJSON),
+        },
+      }
+      const result = await passkeyRegister(payload)
+      if (result.ok) {
+        toast.success('Passkey registered.')
+        await refresh()
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to register passkey.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async (id: string) => {
+    setBusy(true)
+    try {
+      await passkeyDelete(id)
+      toast.success('Passkey removed.')
+      await refresh()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to remove passkey.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="grid gap-2">
+      <div className="flex items-center justify-between">
+        <label className="text-xs text-muted-foreground">Passkeys</label>
+        <Button size="sm" variant="outline" onClick={() => void register()} disabled={busy}>
+          {busy ? <Loader2Icon className="animate-spin" /> : <KeyRoundIcon className="size-3.5" />}
+          Register passkey
+        </Button>
+      </div>
+      {loading ? (
+        <p className="text-xs text-muted-foreground">Loading passkeys…</p>
+      ) : credentials.length === 0 ? (
+        <p className="text-xs text-muted-foreground">No passkeys registered.</p>
+      ) : (
+        <ul className="grid gap-1.5">
+          {credentials.map((c) => (
+            <li
+              key={c.id}
+              className="flex items-center justify-between gap-2 rounded-md border border-border/60 px-2 py-1.5"
+            >
+              <span className="truncate text-xs">{c.name || c.id}</span>
+              <Button
+                size="icon"
+                variant="ghost"
+                aria-label={`Remove passkey ${c.name || c.id}`}
+                disabled={busy}
+                onClick={() => void remove(c.id)}
+              >
+                <Trash2Icon className="size-3.5" />
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
 
 /**
  * Settings tab of the Control Center: a small form over a SAFE subset of
@@ -45,6 +186,17 @@ export function SettingsPanel() {
     language: 'en',
   })
   const [saving, setSaving] = useState(false)
+
+  // Persist a partial settings patch (used by embedded sections like Updates
+  // that own their own controls) and refresh the local settings snapshot.
+  const updateSetting = useCallback(async (patch: Partial<Settings>) => {
+    try {
+      const saved = await updateSettings(patch)
+      setSettings(saved)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to save setting.')
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -116,10 +268,9 @@ export function SettingsPanel() {
           <label htmlFor="cc-default-model" className="text-xs text-muted-foreground">
             Default model
           </label>
-          <select
+          <NativeSelect
             id="cc-default-model"
             aria-label="Default model"
-            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
             value={fields.default_model}
             onChange={(e) => setFields({ ...fields, default_model: e.target.value })}
           >
@@ -128,17 +279,16 @@ export function SettingsPanel() {
                 {m.label}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
 
         <div className="grid gap-1.5">
           <label htmlFor="cc-default-workspace" className="text-xs text-muted-foreground">
             Default workspace
           </label>
-          <select
+          <NativeSelect
             id="cc-default-workspace"
             aria-label="Default workspace"
-            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
             value={fields.default_workspace}
             onChange={(e) => setFields({ ...fields, default_workspace: e.target.value })}
           >
@@ -148,17 +298,16 @@ export function SettingsPanel() {
                 {path}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
 
         <div className="grid gap-1.5">
           <label htmlFor="cc-send-key" className="text-xs text-muted-foreground">
             Send key
           </label>
-          <select
+          <NativeSelect
             id="cc-send-key"
             aria-label="Send key"
-            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
             value={fields.send_key}
             onChange={(e) => setFields({ ...fields, send_key: e.target.value })}
           >
@@ -167,17 +316,16 @@ export function SettingsPanel() {
                 {key}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
 
         <div className="grid gap-1.5">
           <label htmlFor="cc-language" className="text-xs text-muted-foreground">
             Language
           </label>
-          <select
+          <NativeSelect
             id="cc-language"
             aria-label="Language"
-            className="h-9 w-full rounded-md border border-input bg-transparent px-2 text-sm"
             value={fields.language}
             onChange={(e) => setFields({ ...fields, language: e.target.value })}
           >
@@ -186,7 +334,7 @@ export function SettingsPanel() {
                 {code}
               </option>
             ))}
-          </select>
+          </NativeSelect>
         </div>
       </div>
 
@@ -195,6 +343,14 @@ export function SettingsPanel() {
           {saving && <Loader2Icon className="animate-spin" />}
           Save settings
         </Button>
+      </div>
+
+      <div className="border-t border-border/60 pt-3">
+        <PasskeyManager />
+      </div>
+
+      <div className="border-t border-border/60 pt-3">
+        <UpdatesSection settings={settings} onChange={(patch) => void updateSetting(patch)} />
       </div>
     </div>
   )

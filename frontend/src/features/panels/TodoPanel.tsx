@@ -38,6 +38,7 @@ export interface DerivedTodo {
 }
 
 /** Human-readable label for a todo row (string rows are used verbatim). */
+// oxlint-disable-next-line react/only-export-components -- pure helper exported for tests
 export function todoLabel(todo: DerivedTodo | string): string {
   if (typeof todo === 'string') return todo
   return (
@@ -50,12 +51,14 @@ export function todoLabel(todo: DerivedTodo | string): string {
 }
 
 /** Completion state for a todo row (accepts both boolean and status forms). */
+// oxlint-disable-next-line react/only-export-components -- pure helper exported for tests
 export function todoDone(todo: DerivedTodo | string): boolean {
   if (typeof todo === 'string') return false
   return todo.completed === true || todo.done === true || todo.status === 'done'
 }
 
 /** Derive the latest todos snapshot from a transcript (legacy contract). */
+// oxlint-disable-next-line react/only-export-components -- pure helper exported for tests
 export function deriveTodos(messages: Message[]): DerivedTodo[] {
   for (let i = messages.length - 1; i >= 0; i--) {
     const message = messages[i]

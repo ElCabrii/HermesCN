@@ -81,6 +81,10 @@ docs/ui-ux/review-shots/
 # Python build metadata (never commit generated egg-info)
 *.egg-info/
 
+# Python/wheel build artifacts (setuptools build/, dist/)
+build/
+dist/
+
 # Local WebUI runtime data and credentials
 .webui_password
 attachments/

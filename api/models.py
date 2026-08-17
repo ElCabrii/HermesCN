@@ -4992,7 +4992,7 @@ def new_session(workspace=None, model=None, profile=None, model_provider=None, p
         s.save()
     return s
 
-def _hide_from_default_sidebar(session: dict, *, show_cron: bool = False, show_webhook: bool = False, show_kanban: bool = False) -> bool:
+def _hide_from_default_sidebar(session: dict, *, show_cron: bool = False, show_webhook: bool = False, show_kanban: bool = False, show_subagent: bool = False) -> bool:
     """Return True for internal/background sessions hidden from the default list."""
     sid = str(session.get('session_id') or '')
     source = (
@@ -5006,6 +5006,8 @@ def _hide_from_default_sidebar(session: dict, *, show_cron: bool = False, show_w
     if not show_webhook and source == 'webhook':
         return True
     if not show_kanban and source == 'kanban':
+        return True
+    if not show_subagent and source == 'subagent':
         return True
     if bool(session.get('pre_compression_snapshot')):
         return not bool(session.get('_show_pre_compression_snapshot'))

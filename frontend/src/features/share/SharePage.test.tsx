@@ -73,7 +73,7 @@ describe('SharePage', () => {
 
     const userText = await screen.findByText('What changed?')
     expect(userText.closest('[data-role="user"]')).not.toBeNull()
-    expect(userText.closest('.user-bubble')).not.toBeNull()
+    expect(userText.closest('.bg-secondary')).not.toBeNull()
   })
 
   it('renders assistant prose through the shared Markdown component', async () => {
@@ -99,7 +99,7 @@ describe('SharePage', () => {
 
     const code = await screen.findByText('pnpm test')
     expect(code.tagName).toBe('CODE')
-    expect(code.closest('.user-bubble')).not.toBeNull()
+    expect(code.closest('.bg-secondary')).not.toBeNull()
   })
 
   it('keeps tool and system traces out of the transcript view', async () => {
@@ -141,7 +141,11 @@ describe('SharePage', () => {
 
     render(<SharePage token="gone" />)
 
-    expect(await screen.findByText('Shared conversation not found')).toBeInTheDocument()
+    // A stranger following a dead link gets an explanation and a way onward,
+    // not a bare "not found" line.
+    expect(await screen.findByTestId('share-not-found')).toBeInTheDocument()
+    expect(screen.getByText(/no longer available/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /HermesCN/i })).toHaveAttribute('href', '/')
   })
 
   it('shows the server error message for other failures', async () => {

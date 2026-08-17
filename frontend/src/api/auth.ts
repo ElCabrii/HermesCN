@@ -96,3 +96,86 @@ export function startOidcLoginUrl(next?: string): string {
  * exported for the router to recognize.
  */
 export const OIDC_CALLBACK_PATH = '/api/auth/oidc/callback'
+
+// ── Passkeys (WebAuthn) ────────────────────────────────────────────────────
+// The ceremony is browser-driven (navigator.credentials.get/create); the
+// client only exchanges the base64url-encoded options/assertion payloads with
+// the backend. Endpoints (api/routes.py):
+//   POST /api/auth/passkey/options        → { ok, publicKey }
+//   POST /api/auth/passkey/login          → { ok } (sets auth cookie)
+//   POST /api/auth/passkey/register/options → { ok, publicKey }
+//   POST /api/auth/passkey/register       → { ok, credentials }
+//   POST /api/auth/passkey/delete         → { ok }
+//   GET  /api/auth/passkeys               → { credentials }
+
+/** Base64url → Uint8Array (WebAuthn options carry b64u-encoded bytes). */
+export function b64uToBytes(s: string): Uint8Array<ArrayBuffer> {
+  const b64 = String(s || '').replace(/-/g, '+').replace(/_/g, '/')
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+  const bin = atob(padded)
+  const out = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
+  return out
+}
+
+/** ArrayBuffer/Uint8Array → base64url (WebAuthn assertion payloads). */
+export function bytesToB64u(buf: ArrayBuffer | Uint8Array): string {
+  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf)
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+/** Fetch WebAuthn authentication options for a passkey sign-in. */
+export async function getPasskeyLoginOptions(): Promise<Record<string, unknown>> {
+  const data = await api<{ ok: boolean; publicKey?: Record<string, unknown>; error?: string }>(
+    '/api/auth/passkey/options',
+    { method: 'POST', credentials: 'include', body: '{}' },
+  )
+  if (!data?.publicKey) throw new Error(data?.error || 'Passkey unavailable')
+  return data.publicKey
+}
+
+/** Submit a WebAuthn assertion to complete a passkey sign-in. */
+export async function passkeyLogin(payload: Record<string, unknown>): Promise<LoginResult> {
+  return api<LoginResult>('/api/auth/passkey/login', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  })
+}
+
+/** Fetch WebAuthn registration options (requires an authenticated session). */
+export async function getPasskeyRegisterOptions(): Promise<Record<string, unknown>> {
+  const data = await api<{ ok: boolean; publicKey?: Record<string, unknown>; error?: string }>(
+    '/api/auth/passkey/register/options',
+    { method: 'POST', credentials: 'include', body: '{}' },
+  )
+  if (!data?.publicKey) throw new Error(data?.error || 'Passkey registration unavailable')
+  return data.publicKey
+}
+
+/** Submit a WebAuthn attestation to register a new passkey. */
+export async function passkeyRegister(payload: Record<string, unknown>): Promise<{ ok: boolean; credentials?: unknown[] }> {
+  return api<{ ok: boolean; credentials?: unknown[] }>('/api/auth/passkey/register', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify(payload),
+  })
+}
+
+/** Delete a registered passkey by credential id. */
+export async function passkeyDelete(id: string): Promise<{ ok: boolean }> {
+  return api<{ ok: boolean }>('/api/auth/passkey/delete', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify({ id }),
+  })
+}
+
+/** List registered passkeys. */
+export async function listPasskeys(): Promise<{ credentials: unknown[]; disabled?: boolean }> {
+  return api<{ credentials: unknown[]; disabled?: boolean }>('/api/auth/passkeys', {
+    credentials: 'include',
+  })
+}

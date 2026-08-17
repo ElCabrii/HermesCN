@@ -149,23 +149,50 @@ jobs:
       #   * scope_undef_gate.py: no-undef across the shared classic-<script> global
       #     scope, catching a function defined nested but called from a sibling
       #     scope (#3696 — ReferenceError: _sessionAttentionState is not defined).
-      - name: Set up Node for ESLint runtime guards
+      # Frontend CI (HermesCN React/Vite app). The legacy static/ tree was
+      # removed; its ESLint runtime-guard and scope_undef_gate steps are obsolete.
+      # The React app is gated by pnpm lint + test + build + e2e instead.
+      - name: Set up Node + pnpm for frontend CI
         if: needs.changes.outputs.docs_only != 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
 
-      - name: Install ESLint
+      - name: Enable pnpm
         if: needs.changes.outputs.docs_only != 'true'
-        run: npm install --no-save eslint@^10
+        run: corepack enable
 
-      - name: ESLint runtime-error gate (no-const-assign / no-import-assign, #3162)
+      - name: Install frontend dependencies (frozen lockfile)
         if: needs.changes.outputs.docs_only != 'true'
-        run: npx eslint --no-config-lookup -c eslint.runtime-guard.config.mjs "static/**/*.js"
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
 
-      - name: Scope / undefined-reference gate (#3696)
+      - name: Frontend lint (oxlint)
         if: needs.changes.outputs.docs_only != 'true'
-        run: python3 scripts/scope_undef_gate.py
+        working-directory: frontend
+        run: pnpm lint
+
+      - name: Frontend unit tests (Vitest)
+        if: needs.changes.outputs.docs_only != 'true'
+        working-directory: frontend
+        run: pnpm test
+
+      - name: Frontend build (tsc + vite)
+        if: needs.changes.outputs.docs_only != 'true'
+        working-directory: frontend
+        run: pnpm build
+
+      - name: Install Playwright browsers
+        if: needs.changes.outputs.docs_only != 'true'
+        working-directory: frontend
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Frontend E2E (Playwright)
+        if: needs.changes.outputs.docs_only != 'true'
+        working-directory: frontend
+        run: pnpm test:e2e
 
   test:
     needs: changes
@@ -210,6 +237,22 @@ jobs:
             **/requirements*.txt
             **/pyproject.toml
 
+      # pnpm is required by tests/test_issue2695_packaged_runtime_layout.py,
+      # which builds the React frontend before building the wheel so it can
+      # assert the wheel ships the real app. Cached so the 15 shards share the
+      # dependency store.
+      - name: Set up Node + pnpm for packaging test
+        if: needs.changes.outputs.docs_only != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Enable pnpm
+        if: needs.changes.outputs.docs_only != 'true'
+        run: corepack enable
+
       - name: Install dependencies
         if: needs.changes.outputs.docs_only != 'true'
         run: |
@@ -217,8 +260,7 @@ jobs:
           # Office parsers stay optional at runtime; CI installs them explicitly for the workspace preview tests.
           pip install "pyyaml>=6.0" pytest pytest-timeout pytest-asyncio pytest-shard python-docx openpyxl python-pptx playwright
           # ruff is installed so tests/test_ruff_forward_lint.py runs its E9/F821
-          # tree-clean assertions in-suite (mirrors how eslint is available for
-          # tests/test_static_js_runtime_lint.py). If install fails the test
+          # tree-clean assertions in-suite. If install fails the test
           # skips cleanly — it never blocks the matrix.
           pip install ruff || echo "ruff install failed — test_ruff_forward_lint.py will skip"
           # Install the `mcp` package so tests/test_mcp_server.py runs in CI.

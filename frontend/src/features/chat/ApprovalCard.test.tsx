@@ -45,7 +45,16 @@ describe('ApprovalCard', () => {
       expect(screen.getByRole('button', { name })).toBeInTheDocument()
     }
 
-    await user.click(screen.getByRole('button', { name: 'Deny' }))
+    // Refusing must not look like the two approvals next to it, and each
+    // choice states the scope it grants — "Always" permanently allowlists a
+    // dangerous command and used to be styled exactly like "Deny".
+    const deny = screen.getByRole('button', { name: 'Deny' })
+    const always = screen.getByRole('button', { name: 'Always' })
+    expect(deny.className).not.toBe(always.className)
+    expect(deny).toHaveAttribute('title', expect.stringContaining('refuse'))
+    expect(always).toHaveAttribute('title', expect.stringContaining('permanently'))
+
+    await user.click(deny)
     await waitFor(() => expect(respondApproval).toHaveBeenCalledWith({ session_id: 'a', choice: 'deny', approval_id: 'ap1' }))
   })
 

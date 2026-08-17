@@ -5,8 +5,12 @@ import {
   WORKSPACE_PANEL_MIN_WIDTH,
   WORKSPACE_PANEL_MODE_STORAGE_KEY,
   WORKSPACE_PANEL_WIDTH_STORAGE_KEY,
+  consumeOpenFileRequest,
   getFileIconKind,
   getFileKind,
+  openFileRequestAtom,
+  parseWorkspaceHref,
+  requestOpenWorkspaceFile,
   workspacePanelModeAtom,
   workspacePanelWidthAtom,
   workspaceStore,
@@ -121,5 +125,44 @@ describe('workspaceStore — file icon mapping (legacy port)', () => {
   it('falls back to a generic file icon', () => {
     expect(getFileIconKind('LICENSE', 'file')).toBe('file')
     expect(getFileIconKind('link', 'symlink')).toBe('file')
+  })
+})
+
+describe('workspaceStore — workspace:// deep links', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    workspaceStore.set(workspacePanelModeAtom, 'closed')
+    workspaceStore.set(openFileRequestAtom, null)
+  })
+
+  it('parseWorkspaceHref extracts the relative path and strips ~​/ and ./ prefixes', () => {
+    expect(parseWorkspaceHref('workspace://docs/report.md')).toBe('docs/report.md')
+    expect(parseWorkspaceHref('workspace://~/src/a.ts')).toBe('src/a.ts')
+    expect(parseWorkspaceHref('workspace://./main.py')).toBe('main.py')
+    expect(parseWorkspaceHref('WORKSPACE://a/b.txt')).toBe('a/b.txt')
+  })
+
+  it('parseWorkspaceHref returns null for non-workspace hrefs or empty paths', () => {
+    expect(parseWorkspaceHref('https://example.com')).toBeNull()
+    expect(parseWorkspaceHref('workspace://')).toBeNull()
+    expect(parseWorkspaceHref('not a url')).toBeNull()
+  })
+
+  it('requestOpenWorkspaceFile opens the panel to preview and queues the request', () => {
+    requestOpenWorkspaceFile('docs/report.md')
+    expect(workspaceStore.get(workspacePanelModeAtom)).toBe('preview')
+    const req = workspaceStore.get(openFileRequestAtom)
+    expect(req).not.toBeNull()
+    expect(req?.path).toBe('docs/report.md')
+    expect(typeof req?.nonce).toBe('number')
+  })
+
+  it('consumeOpenFileRequest returns and clears the pending request (one-shot)', () => {
+    requestOpenWorkspaceFile('a/b.ts')
+    const first = consumeOpenFileRequest()
+    expect(first?.path).toBe('a/b.ts')
+    expect(workspaceStore.get(openFileRequestAtom)).toBeNull()
+    // A second consume returns nothing.
+    expect(consumeOpenFileRequest()).toBeNull()
   })
 })

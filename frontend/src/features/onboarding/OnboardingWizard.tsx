@@ -18,6 +18,7 @@ import type { JsonObject } from '@/api/types'
 import { addWorkspace } from '@/api/workspace'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { NativeSelect } from '@/components/ui/native-select'
 
 /**
  * First-run onboarding wizard.
@@ -30,8 +31,7 @@ import { Input } from '@/components/ui/input'
  * The wizard renders nothing when GET /api/onboarding/status reports
  * `completed` — including the HERMES_WEBUI_SKIP_ONBOARDING override and the
  * config.yaml auto-complete path, so CLI-configured users never see it.
- * It is intentionally NOT wired into the app shell yet (Phase 8.4); mount it
- * wherever the first-run overlay should appear.
+ * Mounted in App.tsx as a self-gating full-screen overlay.
  */
 
 const STEPS = [
@@ -529,9 +529,12 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
     <div
       role="dialog"
       aria-label="Onboarding wizard"
-      className="fixed inset-0 z-50 overflow-y-auto bg-background/95 backdrop-blur-sm"
+      className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-background/95 p-4 backdrop-blur-sm"
     >
-      <div className="mx-auto flex min-h-full w-full max-w-2xl flex-col px-4 py-8">
+      {/* A card, not a full-height column: stretching to the viewport pinned
+          the footer to the bottom of a 900px screen and left a field of empty
+          space between the checks and the Continue button. */}
+      <div className="my-auto flex w-full max-w-2xl flex-col rounded-xl border border-border bg-card p-6 shadow-lg">
         <header className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-xl font-semibold">Set up Hermes</h1>
@@ -544,17 +547,42 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
           </Button>
         </header>
 
-        <nav aria-label="Wizard steps" className="mt-4 flex items-center gap-1.5 text-xs">
-          {STEPS.map((s, i) => (
-            <span
-              key={s.key}
-              className={`rounded-full px-2.5 py-1 ${
-                i === step ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
-              }`}
-            >
-              {i + 1}. {s.title}
-            </span>
-          ))}
+        {/* Five labelled pills do not fit a phone: they wrapped into multi-line
+            blobs and the last step fell off the edge. Narrow screens get a
+            progress bar with a "step N of M" caption instead. */}
+        <nav aria-label="Wizard steps" className="mt-4">
+          <div className="hidden flex-wrap items-center gap-1.5 text-xs sm:flex">
+            {STEPS.map((s, i) => (
+              <span
+                key={s.key}
+                aria-current={i === step ? 'step' : undefined}
+                className={`rounded-full px-2.5 py-1 whitespace-nowrap ${
+                  i === step
+                    ? 'bg-primary text-primary-foreground'
+                    : i < step
+                      ? 'bg-muted text-foreground/70'
+                      : 'bg-muted text-muted-foreground'
+                }`}
+              >
+                {i + 1}. {s.title}
+              </span>
+            ))}
+          </div>
+          <div className="sm:hidden">
+            {/* The step's name is already the header subtitle; repeating it
+                here would just cost a line on the narrowest screen. */}
+            <div className="flex items-baseline justify-end text-xs">
+              <span className="text-muted-foreground tabular-nums">
+                Step {step + 1} of {STEPS.length}
+              </span>
+            </div>
+            <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className="h-full rounded-full bg-primary transition-[width] duration-300"
+                style={{ width: `${((step + 1) / STEPS.length) * 100}%` }}
+              />
+            </div>
+          </div>
         </nav>
 
         {notice && (
@@ -570,7 +598,7 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
           </div>
         )}
 
-        <main className="mt-6 flex-1">
+        <main className="mt-6">
           {stepMeta.key === 'system' && (
             <div className="space-y-3">
               <CheckRow
@@ -653,8 +681,8 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
 
               <label className="block text-sm font-medium">
                 Provider
-                <select
-                  className="mt-1 h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                <NativeSelect
+                  containerClassName="mt-1"
                   value={providers.some((p) => p.id === form.provider) ? form.provider : ''}
                   onChange={(e) => syncProvider(e.target.value)}
                 >
@@ -677,7 +705,7 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
                           {p.label}
                         </option>
                       ))}
-                </select>
+                </NativeSelect>
               </label>
 
               <label className="block text-sm font-medium">
@@ -773,8 +801,8 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
             <div className="space-y-4">
               <label className="block text-sm font-medium">
                 Default workspace
-                <select
-                  className="mt-1 h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                <NativeSelect
+                  containerClassName="mt-1"
                   value={
                     (status.workspaces?.items ?? []).some((w) => w.path === form.workspace)
                       ? form.workspace
@@ -791,7 +819,7 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
                       {w.path === status.workspaces?.last ? ' (last used)' : ''}
                     </option>
                   ))}
-                </select>
+                </NativeSelect>
               </label>
               <label className="block text-sm font-medium">
                 …or enter a path
@@ -815,8 +843,8 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
               ) : (
                 <label className="block text-sm font-medium">
                   Model
-                  <select
-                    className="mt-1 h-8 w-full rounded-lg border border-input bg-transparent px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                  <NativeSelect
+                    containerClassName="mt-1"
                     value={modelChoices.some((m) => m.id === form.model) ? form.model : ''}
                     onChange={(e) => setForm((f) => ({ ...f, model: e.target.value }))}
                   >
@@ -825,7 +853,7 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
                         {m.label}
                       </option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </label>
               )}
             </div>
@@ -893,7 +921,7 @@ export function OnboardingWizard({ onComplete }: { onComplete?: () => void }) {
           )}
         </main>
 
-        <footer className="mt-8 flex items-center justify-between">
+        <footer className="mt-8 flex items-center justify-between border-t border-border/60 pt-4">
           <Button variant="outline" onClick={back} disabled={step === 0 || busy}>
             Back
           </Button>

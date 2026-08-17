@@ -18,7 +18,10 @@ export function PendingFiles({ files, onRemove }: PendingFilesProps) {
   return (
     <div data-testid="pending-files" className="mb-1.5 flex flex-wrap gap-1.5">
       {files.map((file, index) => (
-        <span key={`${file.name}-${index}`} className="attachment-chip">
+        <span
+          key={`${file.name}-${index}`}
+          className="inline-flex items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 text-[11px] text-foreground"
+        >
           <PaperclipIcon className="size-3" />
           <span className="max-w-40 truncate" title={file.name}>
             {file.name}

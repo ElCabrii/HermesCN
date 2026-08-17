@@ -1,7 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { login, startOidcLoginUrl } from '@/api/auth'
+import {
+  b64uToBytes,
+  bytesToB64u,
+  getPasskeyLoginOptions,
+  login,
+  passkeyLogin,
+  startOidcLoginUrl,
+} from '@/api/auth'
 import { CONNECTION_FAILED, useAuth } from './useAuth'
 import { safeNextPath } from './safeNextPath'
 
@@ -26,8 +33,8 @@ function nextParam(): string | null {
  *    open-redirect-guarded ?next= (safeNextPath), on failure show the
  *    server's error (401 "Invalid password", 429 rate-limit message).
  * 4. OIDC: "Sign in with provider" link → /api/auth/oidc/start?next=<safe>.
- * 5. Passkeys: button rendered when enabled; WebAuthn ceremony is out of
- *    scope (TODO below — see static/login.js:101-140).
+ * 5. Passkeys: WebAuthn ceremony — fetch options, convert b64u<->bytes,
+ *    navigator.credentials.get, then POST /api/auth/passkey/login.
  */
 export function LoginPage() {
   const { loading, unreachable, status } = useAuth()
@@ -55,6 +62,48 @@ export function LoginPage() {
       if (result.ok) {
         window.location.assign(safeNext)
       }
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : CONNECTION_FAILED)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  async function handlePasskeyLogin() {
+    if (!window.PublicKeyCredential || !navigator.credentials) return
+    setError(null)
+    setSubmitting(true)
+    try {
+      const pk = await getPasskeyLoginOptions()
+      // Convert the b64u-encoded challenge and allowCredentials ids to bytes
+      // for the WebAuthn API (mirrors static/login.js:101-140).
+      const publicKey: PublicKeyCredentialRequestOptions = {
+        ...(pk as unknown as PublicKeyCredentialRequestOptions),
+        challenge: b64uToBytes(String(pk.challenge)),
+        allowCredentials: Array.isArray(pk.allowCredentials)
+          ? (pk.allowCredentials as { id: string; type: string }[]).map((c) => ({
+              ...c,
+              type: 'public-key' as const,
+              id: b64uToBytes(c.id),
+            }))
+          : undefined,
+      }
+      const cred = (await navigator.credentials.get({ publicKey })) as PublicKeyCredential | null
+      if (!cred) throw new Error('Passkey sign-in cancelled')
+      const response = cred.response as AuthenticatorAssertionResponse
+      const payload = {
+        id: cred.id,
+        rawId: bytesToB64u(cred.rawId),
+        type: cred.type,
+        response: {
+          authenticatorData: bytesToB64u(response.authenticatorData),
+          clientDataJSON: bytesToB64u(response.clientDataJSON),
+          signature: bytesToB64u(response.signature),
+          userHandle: response.userHandle ? bytesToB64u(response.userHandle) : null,
+        },
+      }
+      const result = await passkeyLogin(payload)
+      if (result.ok) window.location.assign(safeNext)
     } catch (err) {
       setError(err instanceof Error && err.message ? err.message : CONNECTION_FAILED)
     } finally {
@@ -110,13 +159,8 @@ export function LoginPage() {
             type="button"
             variant="outline"
             className="mt-3 w-full"
-            disabled={unreachable}
-            onClick={() => {
-              // TODO(passkeys): WebAuthn ceremony — port static/login.js:101-140
-              // (b64u<->bytes conversion, navigator.credentials.get, then POST
-              // /api/auth/passkey/login with the assertion payload).
-              throw new Error('Passkey sign-in is not implemented yet')
-            }}
+            disabled={submitting || unreachable}
+            onClick={() => void handlePasskeyLogin()}
           >
             Sign in with passkey
           </Button>

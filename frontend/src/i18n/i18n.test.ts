@@ -93,8 +93,8 @@ describe('locale state', () => {
   })
 
   it('keeps a requested-but-unregistered locale (t() falls back)', () => {
-    setLocale('zh')
-    expect(getLocale()).toBe('zh')
+    setLocale('xx')
+    expect(getLocale()).toBe('xx')
     expect(t('composer_send')).toBe('Send message')
   })
 })

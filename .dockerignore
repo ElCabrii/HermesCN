@@ -5,3 +5,10 @@ __pycache__
 *.pyo
 tests/
 .env*
+# Frontend build inputs are produced by the Docker frontend-build stage; the
+# local node_modules and any stale local dist must never enter the build context
+# (they would bloat it and could shadow the reproducible build).
+frontend/node_modules
+frontend/dist
+frontend/test-results
+frontend/playwright-report

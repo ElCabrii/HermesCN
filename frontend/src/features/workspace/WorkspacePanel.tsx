@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAtom } from 'jotai'
 import { toast } from 'sonner'
 import { updateSession } from '@/api/sessions'
+import { useI18n } from '@/i18n'
 import {
   createDir,
   createFile,
   deleteFile,
   getGitStatus,
   getWorkspaces,
+  listDir,
   renameFile,
   type GitStatus,
   type WorkspaceEntry,
@@ -49,6 +51,8 @@ import {
   getFileKind,
   WORKSPACE_PANEL_MAX_WIDTH,
   WORKSPACE_PANEL_MIN_WIDTH,
+  consumeOpenFileRequest,
+  openFileRequestAtom,
   workspacePanelModeAtom,
   workspacePanelWidthAtom,
   workspaceStore,
@@ -85,6 +89,7 @@ export interface WorkspacePanelProps {
 }
 
 export function WorkspacePanel({ sessionId, workspace, onWorkspaceChange }: WorkspacePanelProps) {
+  const { t } = useI18n()
   const [mode, setMode] = useAtom(workspacePanelModeAtom, { store: workspaceStore })
   const [width, setWidth] = useAtom(workspacePanelWidthAtom, { store: workspaceStore })
 
@@ -155,6 +160,38 @@ export function WorkspacePanel({ sessionId, workspace, onWorkspaceChange }: Work
     setPreviewPath(path)
     setMode('preview')
   }
+
+  // Keep a ref to the latest openFile so the workspace:// request effect (which
+  // subscribes once on mount) always calls the current closure.
+  const openFileRef = useRef(openFile)
+  openFileRef.current = openFile
+
+  // Handle `workspace://` deep-link requests (CHANGELOG #2881/#2938): verify the
+  // target exists via a parent-dir listing, then preview it; surface a toast on
+  // miss. Consumed on mount (covers a click that opened the panel) and via a
+  // subscription (covers clicks while already open).
+  useEffect(() => {
+    const openRequested = (path: string) => {
+      const slash = path.lastIndexOf('/')
+      const parent = slash > 0 ? path.slice(0, slash) : '.'
+      const base = slash >= 0 ? path.slice(slash + 1) : path
+      listDir(sessionId, parent)
+        .then((res) => {
+          const found = (res.entries ?? []).some((e) => e.name === base)
+          if (found) openFileRef.current(path)
+          else toast.error(t('file_open_failed'))
+        })
+        .catch(() => toast.error(t('file_open_failed')))
+    }
+    const pending = consumeOpenFileRequest()
+    if (pending) openRequested(pending.path)
+    const unsub = workspaceStore.sub(openFileRequestAtom, () => {
+      const req = consumeOpenFileRequest()
+      if (req) openRequested(req.path)
+    })
+    return unsub
+    // t is stable per locale; sessionId re-binds the listing scope.
+  }, [sessionId, t])
 
   function backToList() {
     if (!confirmDiscard()) return

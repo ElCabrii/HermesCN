@@ -114,6 +114,30 @@ export const liveToolCallsAtom = atom<LiveToolCall[]>([])
 /** Whether the workspace terminal panel is open (slash `/terminal` toggle). */
 export const terminalOpenAtom = atom(false)
 
+/**
+ * True while a session transcript is being fetched.
+ *
+ * Session switching is a network round-trip. Without this the previous
+ * conversation stays fully rendered until the new one lands, so a click on a
+ * sidebar row looks like it did nothing — and on a slow link the user clicks
+ * again. The chat column reads it to show a skeleton instead.
+ */
+export const sessionLoadingAtom = atom(false)
+
+/**
+ * Bumped whenever the session list changes underneath the sidebar.
+ *
+ * The sidebar fetches its rows once on mount, so a conversation created here —
+ * or renamed by the server after the first turn produced a title — never
+ * appeared until a reload. Consumers watch this counter and refetch.
+ */
+export const sessionsRevisionAtom = atom(0)
+
+/** Ask every session-list consumer to refetch. */
+export function refreshSessions(): void {
+  chatStore.set(sessionsRevisionAtom, chatStore.get(sessionsRevisionAtom) + 1)
+}
+
 /** Clear the streaming-surface atoms (approval/clarify/compression/reconnect/live tools). */
 function resetStreamSurface(): void {
   chatStore.set(pendingApprovalAtom, null)
@@ -241,15 +265,22 @@ export async function newSession(): Promise<Session | null> {
       body: JSON.stringify({}),
     })
     const session = data?.session
-    if (!session) return null
+    if (!session) {
+      toast('Could not start a new conversation')
+      return null
+    }
     chatStore.set(sessionAtom, session)
     chatStore.set(messagesAtom, Array.isArray(session.messages) ? session.messages : [])
     chatStore.set(busyAtom, false)
     chatStore.set(streamIdAtom, null)
     closeActiveStream()
     resetStreamSurface()
+    refreshSessions()
     return session
-  } catch {
+  } catch (error) {
+    // Silence here meant the button visibly did nothing: no new conversation,
+    // no reason, nothing to retry. The user must be told.
+    toast(`Could not start a new conversation: ${errorMessage(error)}`)
     return null
   }
 }
@@ -260,10 +291,16 @@ export async function newSession(): Promise<Session | null> {
  * switching back shows the in-progress transcript (§5.2).
  */
 export async function loadSession(sid: string): Promise<Session | null> {
-  const data = await api<{ session: Session | null }>(
-    `/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0`,
-    { credentials: 'include' },
-  )
+  chatStore.set(sessionLoadingAtom, true)
+  let data: { session: Session | null } | null = null
+  try {
+    data = await api<{ session: Session | null }>(
+      `/api/session?session_id=${encodeURIComponent(sid)}&messages=1&resolve_model=0`,
+      { credentials: 'include' },
+    )
+  } finally {
+    chatStore.set(sessionLoadingAtom, false)
+  }
   const session = data?.session
   if (!session) return null
   const inflight = chatStore.get(inflightAtom)[sid]
@@ -327,7 +364,7 @@ export async function sendMessage(text: string, files: File[] = [], model?: stri
         is_image: uploaded.is_image,
       })
     }
-  } catch (e) {
+  } catch {
     if (chatStore.get(sessionAtom)?.session_id === activeSid) {
       chatStore.set(busyAtom, false)
       chatStore.set(streamIdAtom, null)
@@ -592,6 +629,9 @@ export function applyStreamEvent(event: ChatStreamEvent): void {
       chatStore.set(inflightAtom, withoutInflight(chatStore.get(inflightAtom), sid))
       closeActiveStream()
       resetStreamSurface()
+      // A settled turn changes the row: the server may have auto-titled the
+      // conversation, and its position in the "recent" ordering moved.
+      refreshSessions()
       drainQueuedSessionMessage()
       break
     }
@@ -648,7 +688,8 @@ export async function deleteSession(sid: string): Promise<boolean> {
       credentials: 'include',
       body: JSON.stringify({ session_id: sid }),
     })
-  } catch {
+  } catch (error) {
+    toast(`Could not delete the conversation: ${errorMessage(error)}`)
     return false
   }
 
@@ -668,6 +709,7 @@ export async function deleteSession(sid: string): Promise<boolean> {
     }
   }
 
+  refreshSessions()
   toast('Conversation deleted')
   return true
 }

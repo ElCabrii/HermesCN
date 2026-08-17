@@ -19,6 +19,7 @@ export function safeNextPath(raw: string | null): string {
     if (!raw) return './'
     if (raw.charAt(0) !== '/') return './' // must be path-absolute
     if (raw.charAt(1) === '/' || raw.charAt(1) === '\\') return './' // reject // and /\
+    // eslint-disable-next-line no-control-regex -- intentional control-char/whitespace guard for open-redirect safety
     if (/[\x00-\x1f\x7f\s]/.test(raw)) return './' // reject control chars / whitespace
     // #5578: never redirect back to the login page — that self-referential
     // chain is what grows the URL exponentially on repeated expired-auth

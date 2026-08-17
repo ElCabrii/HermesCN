@@ -10,7 +10,12 @@ import {
   type SidebarSessionRow,
 } from '@/api/sessions'
 import { getProjects, type Project } from '@/api/projects'
-import { chatStore, deleteSession, sessionAtom } from '@/features/chat/chatStore'
+import {
+  chatStore,
+  deleteSession,
+  sessionAtom,
+  sessionsRevisionAtom,
+} from '@/features/chat/chatStore'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -105,13 +110,26 @@ function rowTitle(row: SidebarSessionRow): string {
   return row.display_title || row.title || 'Untitled'
 }
 
+/** Compact relative-time string for sidebar row metadata. */
+function formatRelative(updatedAt: number, nowSec: number = Math.floor(Date.now() / 1000)): string {
+  const delta = Math.max(0, nowSec - updatedAt)
+  if (delta < 60) return 'now'
+  if (delta < 3600) return `${Math.floor(delta / 60)}m`
+  if (delta < 86400) return `${Math.floor(delta / 3600)}h`
+  if (delta < 604800) return `${Math.floor(delta / 86400)}d`
+  const d = new Date(updatedAt * 1000)
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
 export interface SessionSidebarProps {
   /** Emitted when the user clicks a row; the parent wires this to loadSession. */
   onSelect: (sessionId: string) => void
+  /** Optional explicit active-session id; falls back to the chat store. */
+  activeSessionId?: string | null
   className?: string
 }
 
-export function SessionSidebar({ onSelect, className }: SessionSidebarProps) {
+export function SessionSidebar({ onSelect, activeSessionId, className }: SessionSidebarProps) {
   const [rows, setRows] = useState<SidebarSessionRow[]>([])
   const [serverTimeSec, setServerTimeSec] = useState<number | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
@@ -122,7 +140,13 @@ export function SessionSidebar({ onSelect, className }: SessionSidebarProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleting, setDeleting] = useState<SidebarSessionRow | null>(null)
-  const activeSession = useAtomValue(sessionAtom, { store: chatStore })
+  // Only the first fetch shows a skeleton; later refreshes keep the list in
+  // place so a rename or pin never makes the sidebar flash.
+  const [loading, setLoading] = useState(true)
+  const storeActive = useAtomValue(sessionAtom, { store: chatStore })
+  // Bumped when a conversation is created, deleted, or auto-titled by a turn.
+  const sessionsRevision = useAtomValue(sessionsRevisionAtom, { store: chatStore })
+  const activeSid = activeSessionId !== undefined ? activeSessionId : storeActive?.session_id ?? null
 
   const loadList = useCallback(async () => {
     try {
@@ -131,6 +155,8 @@ export function SessionSidebar({ onSelect, className }: SessionSidebarProps) {
       if (res.server_time) setServerTimeSec(res.server_time)
     } catch {
       // Quiet surface: keep the previous list on failure.
+    } finally {
+      setLoading(false)
     }
   }, [])
 
@@ -140,6 +166,12 @@ export function SessionSidebar({ onSelect, className }: SessionSidebarProps) {
       .then((res) => setProjects(res.projects ?? []))
       .catch(() => setProjects([]))
   }, [loadList])
+
+  // Re-read the list whenever the store reports the session set changed.
+  useEffect(() => {
+    if (sessionsRevision === 0) return
+    void loadList()
+  }, [sessionsRevision, loadList])
 
   // Debounced search; an empty query restores the full list.
   useEffect(() => {
@@ -242,16 +274,26 @@ export function SessionSidebar({ onSelect, className }: SessionSidebarProps) {
       <div className="relative mb-2 shrink-0">
         <SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input
+          type="search"
           aria-label="Search conversations"
           placeholder="Search conversations"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          className="h-8 pl-7 text-sm"
+          onKeyDown={(e) => {
+            // Escape clears the filter and hands focus back to the list, so a
+            // search never becomes a state the user has to click out of.
+            if (e.key === 'Escape' && query !== '') {
+              e.preventDefault()
+              setQuery('')
+            }
+          }}
+          className="h-8 pl-7 text-sm [&::-webkit-search-cancel-button]:appearance-none"
         />
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto pr-0.5">
-        {rows.length === 0 && (
+        {loading && rows.length === 0 && <SidebarSkeleton />}
+        {!loading && rows.length === 0 && (
           <p
             data-testid="sidebar-empty"
             className="px-2 py-6 text-center text-xs text-muted-foreground"
@@ -283,7 +325,7 @@ export function SessionSidebar({ onSelect, className }: SessionSidebarProps) {
                     <SessionRow
                       key={row.session_id}
                       row={row}
-                      active={activeSession?.session_id === row.session_id}
+                      active={activeSid === row.session_id}
                       projectName={
                         row.project_id ? projectNameById.get(row.project_id) ?? null : null
                       }
@@ -334,6 +376,18 @@ export function SessionSidebar({ onSelect, className }: SessionSidebarProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+/** First-paint placeholder for the session list. */
+function SidebarSkeleton() {
+  return (
+    <div data-testid="sidebar-skeleton" aria-hidden="true" className="animate-pulse px-1.5 py-1">
+      <div className="mb-2 h-3 w-16 rounded bg-muted" />
+      {[72, 88, 64, 80, 56].map((w, i) => (
+        <div key={i} className="mb-1.5 h-6 rounded-md bg-muted" style={{ width: `${w}%` }} />
+      ))}
     </div>
   )
 }
@@ -398,30 +452,54 @@ function SessionRow({
     <li
       data-testid={`session-row-${row.session_id}`}
       data-active={active ? 'true' : undefined}
-      className="relative"
+      className="group/row relative"
     >
       <button
         type="button"
         aria-current={active ? 'true' : undefined}
+        aria-label={title}
         onClick={() => onSelect(row.session_id)}
         className={cn(
-          'flex w-full items-center gap-1.5 rounded-md px-1.5 py-1.5 text-left text-sm',
-          active ? 'bg-accent/15 text-accent-foreground' : 'hover:bg-muted/60',
+          // Roomier rows on touch, dense on the desktop column.
+          'relative flex w-full items-center gap-1.5 rounded-md px-1.5 py-2.5 text-left text-sm transition-colors md:py-1.5',
+          // `text-accent-foreground` is the ink for a SOLID accent fill; over a
+          // 15% tint it collapsed to 1.06:1 on dark and the active
+          // conversation's title was unreadable. The selected row is carried by
+          // the tint plus the accent marker below, with ordinary foreground ink.
+          active
+            ? 'bg-accent/15 font-medium text-foreground'
+            : 'text-foreground/90 hover:bg-muted/60',
         )}
       >
-        {streaming && (
+        {active && (
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-1 left-0 w-0.5 rounded-full bg-accent"
+          />
+        )}
+        {streaming ? (
           <span
             data-testid={`streaming-indicator-${row.session_id}`}
             title="Streaming"
             aria-label="Streaming"
             className="size-1.5 shrink-0 animate-pulse rounded-full bg-accent"
           />
+        ) : row.pinned ? (
+          <PinIcon
+            className="size-3 shrink-0 text-accent/70"
+            aria-label="Pinned"
+          />
+        ) : (
+          <span aria-hidden="true" className="size-3 shrink-0" />
         )}
         <span className="min-w-0 flex-1 truncate">{title}</span>
+        <span aria-hidden="true" className="shrink-0 text-[11px] text-muted-foreground/70 tabular-nums">
+          {formatRelative(row.updated_at)}
+        </span>
         {readOnly && (
           <span
             data-testid={`source-label-${row.session_id}`}
-            className="shrink-0 rounded border border-border px-1 py-px text-[10px] text-muted-foreground"
+            className="shrink-0 rounded border border-border/60 bg-background/60 px-1 py-px text-[11px] text-muted-foreground"
           >
             {row.source_label || 'CLI'}
           </span>
@@ -429,13 +507,19 @@ function SessionRow({
         {projectName && (
           <span
             data-testid={`project-chip-${row.session_id}`}
-            className="shrink-0 rounded border border-border px-1 py-px text-[10px] text-muted-foreground"
+            className="shrink-0 rounded border border-border/60 bg-background/60 px-1 py-px text-[11px] text-muted-foreground"
           >
             {projectName}
           </span>
         )}
       </button>
-      <div className="absolute top-1/2 right-0.5 -translate-y-1/2">
+      <div
+        className={cn(
+          'absolute top-1/2 right-0.5 -translate-y-1/2 transition-opacity',
+          'opacity-0 group-hover/row:opacity-100 focus-within:opacity-100',
+          active && 'opacity-100',
+        )}
+      >
         <DropdownMenu>
           <DropdownMenuTrigger
             render={

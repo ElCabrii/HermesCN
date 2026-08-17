@@ -21,7 +21,7 @@ describe('MessageList', () => {
     render(<MessageList messages={[msg({ role: 'assistant', content: '**bold** answer' })]} />)
     const row = screen.getByText('bold').closest('[data-role="assistant"]')
     expect(row).not.toBeNull()
-    expect(row?.querySelector('.prose')).not.toBeNull()
+    expect(row?.querySelector('[data-prose="true"]')).not.toBeNull()
   })
 
   it('renders attachment chips on user messages', () => {
@@ -157,11 +157,35 @@ describe('MessageList', () => {
     expect(within(row).getByText(/x{600}/)).toBeInTheDocument()
   })
 
-  it('renders tool result messages as debug rows', () => {
-    render(<MessageList messages={[msg({ role: 'tool', content: '42', name: 'calc' })]} />)
-    const row = screen.getByText('calc').closest('[data-role="tool"]')
+  it('folds tool result messages into the owning turn activity disclosure', async () => {
+    // docs/UIUX-GUIDE.md: internal events must not each become a first-class
+    // chat card. A settled `role: "tool"` entry belongs to the assistant turn
+    // that produced it, behind that turn's one Activity disclosure.
+    const user = userEvent.setup()
+    render(
+      <MessageList
+        messages={[
+          msg({ role: 'assistant', content: 'let me check' }),
+          msg({ role: 'tool', content: '42', name: 'calc' }),
+        ]}
+      />,
+    )
+    expect(screen.queryByText('calc')).not.toBeInTheDocument()
+
+    const summary = screen.getByRole('button', { name: 'Activity: 1 tool' })
+    expect(summary.closest('[data-role="tool"]')).toHaveAttribute('data-collapsed', 'true')
+    await user.click(summary)
+
+    const row = screen.getByText('calc').closest('[data-tool-name="calc"]')
     expect(row).not.toBeNull()
-    expect(row).toHaveAttribute('data-tool-name', 'calc')
+    expect(row).toHaveAttribute('data-tool-status', 'done')
+  })
+
+  it('keeps orphan tool results reachable when no assistant turn owns them', async () => {
+    const user = userEvent.setup()
+    render(<MessageList messages={[msg({ role: 'tool', content: '42', name: 'calc' })]} />)
+    await user.click(screen.getByRole('button', { name: 'Activity: 1 tool' }))
+    expect(screen.getByText('calc').closest('[data-tool-name="calc"]')).not.toBeNull()
   })
 
   it('renders the live compression divider centered and non-interactive', () => {

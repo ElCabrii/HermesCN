@@ -18,23 +18,12 @@
 ## Static JS runtime lint (brick-class regression guard)
 
 Some JS bugs throw a `TypeError`/`ReferenceError` only when a specific function
-actually runs in the browser — `node --check` (lazy syntax check), source-presence
-tests, and even executing the file all miss them. Issue **#3162** was exactly this:
-a `const` binding reassigned inside `_ensureMessagesLoaded` bricked "load conversation
-messages" on every mobile message (v0.51.161–166).
-
-The guard is a curated, zero-false-positive ESLint config (`eslint.runtime-guard.config.mjs`)
-that runs ONLY runtime-error rules (`no-const-assign`, `no-import-assign`) over
-`static/**/*.js`. It is NOT a style linter and has no formatting rules.
-
-```bash
-# one-time dev setup (ESLint is a dev-only tool; the app stays pure Python + vanilla JS):
-npm install --no-save --before=<a-date-≥48h-ago> eslint   # package-age guard
-# run the guard:
-npm run lint:runtime
-# or directly:
-npx eslint --no-config-lookup -c eslint.runtime-guard.config.mjs "static/**/*.js"
-```
+actually runs in the browser. The legacy `static/` frontend used an ESLint
+runtime guard (`eslint.runtime-guard.config.mjs`) over `static/**/*.js`; that
+tree has been removed in the HermesCN remake. The React frontend is gated by
+Oxlint (`pnpm lint`), Vitest (`pnpm test`), a TypeScript build (`pnpm build`),
+and Playwright E2E (`pnpm test:e2e`) — see the frontend CI job in
+`.github/workflows/tests.yml`.
 
 ## Python lint gate (ruff) — forward-looking, new-code-only
 
@@ -90,6 +79,31 @@ It is intentionally **credential-free**: it strips every `*_API_KEY` from the
 environment before launching the server, needs no secrets, and does not drive a
 real model (it verifies the app *loads and initializes* cleanly — the brick class
 that breaks the page for everyone).
+
+## Frontend CI (HermesCN React app)
+
+The React frontend is gated in CI (`.github/workflows/tests.yml`) by:
+
+```bash
+cd frontend
+pnpm install --frozen-lockfile
+pnpm lint        # oxlint
+pnpm test        # Vitest unit/component tests
+pnpm build       # tsc -b + vite build
+pnpm test:e2e    # Playwright E2E (isolated backend)
+```
+
+E2E tests boot an isolated backend with a temporary state directory and never
+touch real user state. The app shell must be the real React app — a test that
+passes against the 503 "Frontend is not built" placeholder is a failure.
+
+## Packaging regression test
+
+`tests/test_issue2695_packaged_runtime_layout.py` builds the React frontend
+(requires pnpm) and the Python wheel, then asserts the wheel ships the built app
+(`frontend/dist/index.html`, hashed assets, manifest, service worker, icons).
+It also verifies the installed layout resolves the React index via the runtime
+path logic. It skips cleanly when pnpm is unavailable.
 
 ## Public conversation lifecycle gate
 

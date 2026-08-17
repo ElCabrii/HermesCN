@@ -34,7 +34,7 @@ export function SlashMenu({ matches, selected, onSelect, onMouseEnter }: SlashMe
       data-testid="slash-menu"
       role="listbox"
       aria-label="Slash commands"
-      className="max-h-56 overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-lg"
+      className="absolute right-0 bottom-full left-0 z-30 mb-2 max-h-64 overflow-y-auto rounded-xl border border-border bg-popover py-1 shadow-lg ring-1 ring-foreground/5"
     >
       {matches.map((match, i) => {
         const isSubArg = match.kind === 'subarg'
@@ -47,8 +47,10 @@ export function SlashMenu({ matches, selected, onSelect, onMouseEnter }: SlashMe
             data-selected={selectedRow}
             data-kind={match.kind}
             className={cn(
-              'flex cursor-pointer flex-col px-3 py-1.5 text-sm',
-              selectedRow && 'bg-accent text-accent-foreground',
+              'flex cursor-pointer flex-col gap-0.5 px-3 py-1.5 text-sm transition-colors',
+              selectedRow
+                ? 'bg-accent/15 text-foreground'
+                : 'hover:bg-muted/60',
             )}
             onMouseDown={(event) => {
               event.preventDefault()

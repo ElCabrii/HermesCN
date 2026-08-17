@@ -3,7 +3,7 @@
 [Hermes Agent](https://hermes-agent.nousresearch.com/) is a sophisticated autonomous agent that lives on your server, accessed via a terminal or messaging apps, that remembers what it learns and gets more capable the longer it runs.
 
 Hermes WebUI is a lightweight, dark-themed web app interface in your browser for [Hermes Agent](https://hermes-agent.nousresearch.com/).
-Full parity with the CLI experience - everything you can do from a terminal, you can do from this UI. No build step, no framework, no bundler. Just Python and vanilla JS.
+Full parity with the CLI experience - everything you can do from a terminal, you can do from this UI. The backend is a Python standard-library HTTP server; the frontend is a React + Vite + TypeScript app.
 
 Layout: three-panel. Left sidebar for sessions and navigation, center for chat,
 right for workspace file browsing. Model, profile, and workspace controls live in
@@ -612,20 +612,25 @@ Other frontend commands (run from `frontend/`):
 
 ```bash
 pnpm test       # Vitest unit/component tests
-pnpm e2e        # Playwright end-to-end tests (isolated backend)
-pnpm build      # produces frontend/dist/
-pnpm typecheck  # tsc --noEmit
+pnpm test:e2e   # Playwright end-to-end tests (isolated backend)
+pnpm build      # produces frontend/dist/ (tsc + vite)
+pnpm lint       # oxlint
 ```
 
 When `frontend/dist/` exists, the Python server serves it at `/` (with token
-substitution); otherwise it falls back to the legacy `static/` app.
+substitution). A source checkout must build the frontend explicitly
+(`cd frontend && pnpm install --frozen-lockfile && pnpm build`); Docker and
+release builds produce the assets automatically. If the build is missing, `/`
+returns a precise "Frontend is not built" error with build instructions — never
+a bare 404 or a restart placeholder.
 
 ---
 
 ## Architecture
 
-No build step, no framework, no bundler — a Python standard-library HTTP server
-and vanilla JS. The backend lives in `api/`, the frontend in `static/`.
+The backend is a Python standard-library HTTP server; the frontend is a React +
+Vite + TypeScript + Tailwind + shadcn/ui app. The backend lives in `api/`, the
+frontend in `frontend/`.
 
 **Backend (`api/`)**
 
@@ -646,18 +651,19 @@ api/
   workspace.py    File ops, workspace helpers, git detection
 ```
 
-**Frontend (`static/`)**
+**Frontend (`frontend/`)**
 
 ```
-index.html        HTML template
-style.css         All CSS incl. mobile responsive, themes + skins
-ui.js             DOM helpers, renderMd, tool cards, context indicator
-workspace.js      File preview, file ops, git badge, central api() fetch wrapper
-sessions.js       Session CRUD, collapsible groups, search, reload recovery
-messages.js       send(), SSE handlers, live streaming, session recovery
-panels.js         Cron, skills, memory, profiles, settings (Control Center)
-commands.js       Slash command autocomplete
-boot.js           Mobile nav, voice input, theme/skin boot, bfcache handler
+src/App.tsx            Routes + first-run onboarding overlay
+src/api/               Typed HTTP client (auth, chat, sessions, workspace, panels)
+src/features/chat/     Chat workbench: streaming, composer, markdown, tool cards
+src/features/sessions/ Session sidebar (CRUD, search, projects)
+src/features/workspace/ File tree, preview, editor
+src/features/panels/   Control Center (tasks, skills, memory, profiles, providers, todo, settings)
+src/features/terminal/  Embedded PTY terminal
+src/features/auth/     Login (password/OIDC/passkey), RequireAuth
+src/theme/             Themes + skins
+src/i18n/              Locale catalogs
 ```
 
 **Tests + packaging**

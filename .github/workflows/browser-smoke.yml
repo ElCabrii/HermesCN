@@ -117,6 +117,25 @@ jobs:
           # Install only the Chromium browser + its system deps.
           python -m playwright install --with-deps chromium
 
+      - name: Set up Node + pnpm
+        if: needs.changes.outputs.docs_only != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+          cache-dependency-path: frontend/pnpm-lock.yaml
+
+      - name: Enable pnpm
+        if: needs.changes.outputs.docs_only != 'true'
+        run: corepack enable
+
+      - name: Build the React frontend
+        if: needs.changes.outputs.docs_only != 'true'
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
       - name: Run browser smoke
         if: needs.changes.outputs.docs_only != 'true'
         run: python tests/browser_smoke.py

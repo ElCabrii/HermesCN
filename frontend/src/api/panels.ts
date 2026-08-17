@@ -566,5 +566,202 @@ export function updateSettings(patch: JsonObject): Promise<Settings> {
     method: 'POST',
     credentials: 'include',
     body: JSON.stringify(patch),
+  }).then((saved) => {
+    // Surfaces outside the settings panel read settings too (the composer's
+    // send key, for one). Without a notification they kept using the values
+    // they fetched at mount, so a saved preference did not take effect until a
+    // page reload.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(SETTINGS_CHANGED_EVENT, { detail: saved }))
+    }
+    return saved
   })
+}
+
+/** Fired on `window` after settings are saved; detail is the saved settings dict. */
+export const SETTINGS_CHANGED_EVENT = 'hermes:settings-changed'
+
+// ── Providers ──────────────────────────────────────────────────────────────
+// Contract verified against api/providers.py + the legacy providers settings
+// section (static/panels.js `loadProvidersPanel`). The backend keeps every
+// endpoint; the React port dropped the UI, so this client re-ports it.
+
+/** One model in a provider's catalog (`models` may be a trimmed subset). */
+export interface ProviderModel {
+  id: string
+  label?: string
+}
+
+/** One known provider with its configuration status (GET /api/providers). */
+export interface ProviderInfo extends JsonObject {
+  id: string
+  display_name: string
+  has_key?: boolean
+  configurable?: boolean
+  is_oauth?: boolean
+  is_custom?: boolean
+  is_plugin_provider?: boolean
+  is_self_hosted?: boolean
+  key_source?: 'oauth' | 'config_yaml' | 'env_file' | 'env_var' | 'pool' | 'none' | string
+  auth_error?: string | null
+  base_url?: string | null
+  models?: ProviderModel[]
+  models_total?: number
+}
+
+export interface ProvidersResponse extends JsonObject {
+  providers: ProviderInfo[]
+  active_provider?: string | null
+}
+
+/** Result of POST /api/providers, /api/providers/delete, /api/models/refresh. */
+export interface ProviderMutationResponse extends JsonObject {
+  ok: boolean
+  provider?: string
+  display_name?: string
+  action?: 'updated' | 'removed' | string
+  error?: string
+}
+
+/** One quota/usage window (account-limits or openrouter-quota shape). */
+export interface QuotaWindow extends JsonObject {
+  label?: string
+  used_percent?: number | null
+  remaining_percent?: number | null
+  reset_at?: string | null
+  detail?: string | null
+}
+
+/** Account-limits payload from Hermes Agent's /usage abstraction. */
+export interface AccountLimits extends JsonObject {
+  provider?: string | null
+  source?: string | null
+  title?: string
+  plan?: string | null
+  windows?: QuotaWindow[]
+  details?: string[]
+  available?: boolean
+  unavailable_reason?: string | null
+  fetched_at?: string | null
+  pool?: {
+    credentials?: {
+      label?: string
+      status?: string
+      plan?: string | null
+      windows?: QuotaWindow[]
+      details?: string[]
+      unavailable_reason?: string | null
+    }[]
+    total_credentials?: number
+    available_credentials?: number
+    exhausted_credentials?: number
+    failed_credentials?: number
+    queried_credentials?: number
+    plans?: string[]
+  } | null
+}
+
+/** GET /api/provider/quota response (OpenRouter credits or account limits). */
+export interface ProviderQuotaResponse extends JsonObject {
+  ok: boolean
+  provider?: string | null
+  display_name?: string | null
+  supported?: boolean
+  status?: string
+  label?: string | null
+  quota?: { limit_remaining?: number | null; usage?: number | null; limit?: number | null } | null
+  account_limits?: AccountLimits | null
+  message?: string
+}
+
+/** One daily spend snapshot from GET /api/provider/cost-history. */
+export interface CostSnapshot extends JsonObject {
+  date?: string
+  delta?: number | null
+}
+
+export interface ProviderCostHistoryResponse extends JsonObject {
+  ok: boolean
+  provider?: string | null
+  status?: string
+  supported?: boolean
+  monthly_budget?: number | null
+  window_days?: number
+  snapshots?: CostSnapshot[]
+  message?: string
+}
+
+/** POST /api/providers/self-hosted response. */
+export interface SelfHostedSetupResponse extends JsonObject {
+  ok: boolean
+  provider?: string
+  base_url?: string
+  model?: string
+  error?: string
+}
+
+/** Fetch the provider catalog with configuration status. */
+export function getProviders(): Promise<ProvidersResponse> {
+  return api<ProvidersResponse>('/api/providers', { credentials: 'include' })
+}
+
+/** Set (or clear, when key is null/empty) a provider's API key. */
+export function setProviderKey(providerId: string, apiKey: string | null): Promise<ProviderMutationResponse> {
+  return api<ProviderMutationResponse>('/api/providers', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify({ provider: providerId, api_key: apiKey }),
+  })
+}
+
+/** Remove a provider's API key. */
+export function deleteProviderKey(providerId: string): Promise<ProviderMutationResponse> {
+  return api<ProviderMutationResponse>('/api/providers/delete', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify({ provider: providerId }),
+  })
+}
+
+/** Configure a self-hosted provider (ollama/lmstudio) in config.yaml. */
+export function setupSelfHostedProvider(params: {
+  provider: string
+  base_url: string
+  model: string
+  api_key?: string
+  activate?: boolean
+}): Promise<SelfHostedSetupResponse> {
+  return api<SelfHostedSetupResponse>('/api/providers/self-hosted', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify(params),
+  })
+}
+
+/** Invalidate the server's model catalog cache for one provider. */
+export function refreshProviderModels(providerId: string): Promise<ProviderMutationResponse> {
+  return api<ProviderMutationResponse>('/api/models/refresh', {
+    method: 'POST',
+    credentials: 'include',
+    body: JSON.stringify({ provider: providerId }),
+  })
+}
+
+/** Fetch quota/usage status for the active provider (optionally forced). */
+export function getProviderQuota(force = false): Promise<ProviderQuotaResponse> {
+  const qs = force ? `?refresh=1&ts=${Date.now()}` : ''
+  return api<ProviderQuotaResponse>(`/api/provider/quota${qs}`, { credentials: 'include' })
+}
+
+/** Fetch daily cost-history snapshots (OpenRouter only). */
+export function getProviderCostHistory(providerId: string, days = 7): Promise<ProviderCostHistoryResponse> {
+  return api<ProviderCostHistoryResponse>(
+    `/api/provider/cost-history?provider=${encodeURIComponent(providerId)}&days=${days}`,
+    { credentials: 'include' },
+  )
+}
+
+/** Set or clear the OpenRouter monthly cost budget (settings.json key). */
+export function setProviderCostBudget(value: number | null): Promise<Settings> {
+  return updateSettings({ provider_cost_budget: value })
 }

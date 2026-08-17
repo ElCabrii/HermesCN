@@ -1,3 +1,17 @@
+# ── Frontend build stage ────────────────────────────────────────────────────
+# Builds the React app into frontend/dist/ so the runtime image serves the real
+# app at / (never the 503 restart placeholder). Node, pnpm and dev dependencies
+# live only in this stage; the runtime image receives just the built assets.
+FROM node:22-alpine AS frontend-build
+WORKDIR /build
+# corepack ships with the node image and provides pnpm pinned by packageManager.
+RUN corepack enable
+# Copy manifests first for layer caching; install with the frozen lockfile.
+COPY frontend/package.json frontend/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY frontend/ ./
+RUN pnpm build
+
 FROM python:3.12-slim
 
 LABEL maintainer="nesquena"
@@ -131,6 +145,11 @@ USER root
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh
 
 COPY --chown=root:root . /apptoo
+
+# Feed the built React app from the frontend build stage into the runtime image.
+# The build context may or may not contain frontend/dist (it is gitignored), so
+# the assets always come from the reproducible build stage, never a local dist.
+COPY --from=frontend-build --chown=root:root /build/dist /apptoo/frontend/dist
 
 # Bake the git version tag into the image so the settings badge works even
 # when .git is not present (it is excluded by .dockerignore).

@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ComponentPropsWithoutRef, type ReactNode } from 'react'
+import { LinkIcon, Loader2Icon, TriangleAlertIcon } from 'lucide-react'
+import { cn } from '@/lib/utils'
 import { ApiError } from '@/api/client'
 import { getSharedTranscript, type SharedTranscript } from '@/api/share'
 import { Markdown } from '@/features/chat/Markdown'
 
 /**
- * Public read-only share page (route /share/:token, wired in a later task).
+ * Public read-only share page (route /share/:token in App.tsx).
  *
  * Renders the sanitized snapshot from GET /api/share/<token> — no auth, no
  * interactivity. Layout mirrors the chat transcript contract (DESIGN.md):
@@ -17,6 +19,48 @@ import { Markdown } from '@/features/chat/Markdown'
 type ShareStatus = 'loading' | 'ready' | 'not-found' | 'error'
 
 const EMPTY_NOTE = 'This shared conversation has no visible messages.'
+
+/** Centered notice used by the share page's non-content states. */
+function ShareNotice({
+  icon,
+  title,
+  body,
+  tone = 'muted',
+  ...props
+}: {
+  icon: ReactNode
+  title: string
+  body: string
+  tone?: 'muted' | 'destructive'
+} & ComponentPropsWithoutRef<'div'>) {
+  return (
+    <div
+      {...props}
+      className="flex flex-col items-center gap-3 px-4 py-24 text-center"
+    >
+      <div
+        className={cn(
+          'grid size-11 place-items-center rounded-xl border',
+          tone === 'destructive'
+            ? 'border-destructive/30 bg-destructive/10 text-destructive'
+            : 'border-border bg-muted text-muted-foreground',
+        )}
+      >
+        {icon}
+      </div>
+      <div className="flex flex-col gap-1">
+        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <p className="max-w-sm text-sm text-muted-foreground">{body}</p>
+      </div>
+      <a
+        href="/"
+        className="text-sm font-medium text-accent underline-offset-4 hover:underline"
+      >
+        Go to HermesCN
+      </a>
+    </div>
+  )
+}
 
 function ShareMeta({ transcript }: { transcript: SharedTranscript }) {
   const count = transcript.message_count ?? transcript.messages.length
@@ -50,15 +94,13 @@ function SharedMessages({ transcript }: { transcript: SharedTranscript }) {
       {messages.map((message, i) =>
         message.role === 'user' ? (
           <div key={i} data-role="user" className="flex justify-end">
-            <div className="user-bubble">
+            <div className="flex max-w-[80%] flex-col gap-1.5 rounded-lg bg-secondary px-3 py-2 text-sm leading-[1.55] text-secondary-foreground">
               <Markdown content={message.content} />
             </div>
           </div>
         ) : (
           <div key={i} data-role="assistant" className="flex flex-col gap-2">
-            <div className="prose" data-prose="true">
-              <Markdown content={message.content} />
-            </div>
+            <Markdown content={message.content} prose />
           </div>
         ),
       )}
@@ -107,19 +149,34 @@ export function SharePage({ token }: { token: string }) {
       <main className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl px-4 py-4">
           {status === 'loading' && (
-            <div role="status" aria-live="polite" className="text-sm text-muted-foreground">
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-center justify-center gap-2 py-24 text-sm text-muted-foreground"
+            >
+              <Loader2Icon className="size-4 animate-spin" />
               Loading shared conversation…
             </div>
           )}
+          {/* A stranger following a stale link lands here. A bare line of grey
+              text in the top-left corner reads like a broken page, so say what
+              happened and offer somewhere to go. */}
           {status === 'not-found' && (
-            <div data-testid="share-not-found" className="text-sm text-muted-foreground">
-              Shared conversation not found
-            </div>
+            <ShareNotice
+              data-testid="share-not-found"
+              icon={<LinkIcon className="size-5" />}
+              title="This share link is no longer available"
+              body="The conversation may have been unshared or deleted by its owner. Ask them for a fresh link."
+            />
           )}
           {status === 'error' && (
-            <div role="alert" className="text-sm text-destructive">
-              {error}
-            </div>
+            <ShareNotice
+              role="alert"
+              tone="destructive"
+              icon={<TriangleAlertIcon className="size-5" />}
+              title="Could not load this conversation"
+              body={error ?? 'Something went wrong while fetching the snapshot.'}
+            />
           )}
           {status === 'ready' && transcript && (
             <article>

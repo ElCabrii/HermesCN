@@ -53,32 +53,30 @@ def test_all_routes_accessible_without_auth():
 
 
 def test_login_page_served():
-    """GET /login should return the login page HTML."""
+    """GET /login serves the React SPA shell (login is a migrated surface).
+
+    The legacy server-rendered static/login.js page was removed with the
+    static/ tree; /login now falls through to the SPA shell condition so the
+    React LoginPage renders client-side. Assert the legacy page is gone in
+    every build state: a built dist serves the shell (200), a missing dist
+    serves the precise 'Frontend is not built' 503 — but never the legacy page.
+    """
+    import urllib.error
+
     req = urllib.request.Request(BASE + "/login")
-    with urllib.request.urlopen(req, timeout=10) as r:
-        html = r.read().decode()
-        assert r.status == 200
-        assert "Sign in" in html
-        assert "Hermes" in html
-        assert 'src="static/login.js?v=' in html
-        assert 'src="/static/login.js"' not in html
-
-
-def test_login_page_cache_busts_login_script():
-    """GET /login must version login.js so stale cache/SW entries cannot trap old auth code."""
-    from api import routes
-
-    assert "static/login.js?v={{WEBUI_VERSION}}" in routes._LOGIN_PAGE_HTML
-
-
-def test_login_route_injects_webui_version_for_login_script():
-    """The /login route should replace the login.js version placeholder."""
-    from pathlib import Path
-
-    src = Path(__file__).resolve().parents[1].joinpath("api", "routes.py").read_text(encoding="utf-8")
-    login_block = src[src.find('if parsed.path == "/login"'):src.find('if parsed.path == "/api/auth/status"')]
-    assert "WEBUI_VERSION" in login_block
-    assert "{{WEBUI_VERSION}}" in login_block
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            html, status = r.read().decode(), r.status
+    except urllib.error.HTTPError as e:
+        html, status = e.read().decode(), e.code
+    assert status in (200, 503)
+    # Legacy static login page must be gone in both build states.
+    assert "static/login.js" not in html
+    assert "<h1>Hermes</h1>" not in html
+    if status == 200:
+        assert '<div id="root">' in html
+    else:
+        assert "Frontend is not built" in html
 
 
 # ── Security headers ─────────────────────────────────────────────────────

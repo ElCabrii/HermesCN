@@ -1,6 +1,20 @@
 import { atom, getDefaultStore, useAtom } from 'jotai'
 import { useCallback } from 'react'
 import { en } from './locales/en'
+import { cs } from './locales/cs'
+import { de } from './locales/de'
+import { es } from './locales/es'
+import { fr } from './locales/fr'
+import { it } from './locales/it'
+import { ja } from './locales/ja'
+import { ko } from './locales/ko'
+import { pl } from './locales/pl'
+import { pt } from './locales/pt'
+import { ru } from './locales/ru'
+import { tr } from './locales/tr'
+import { vi } from './locales/vi'
+import { zh } from './locales/zh'
+import { zhHant } from './locales/zh-Hant'
 
 /**
  * i18n infrastructure (Task 8.1).
@@ -13,10 +27,11 @@ import { en } from './locales/en'
  *     (the key `static/boot.js` reads on boot)
  *   - `useI18n()` re-renders with fresh strings when the locale changes
  *
- * Only the `en` catalog ships today (see `locales/en.ts` — other locales are
- * deferred). `t()` gracefully falls back to `en` for any unregistered locale,
- * and `registerLocale()` allows future catalogs (or tests) to be added
- * without touching this module.
+ * The `en` catalog is the default; the non-English catalogs (es, de, fr, it,
+ * ja, ko, pl, pt, ru, tr, vi, zh, zh-Hant) are ported from the legacy
+ * `static/i18n.js` and registered below. `t()` gracefully falls back to `en`
+ * for any unregistered locale, and `registerLocale()` allows future catalogs
+ * (or tests) to be added without touching this module.
  */
 
 /** Default/fallback locale (also the boot default). */
@@ -37,7 +52,8 @@ export type TranslationKey = keyof typeof en
  */
 export type Catalog = Partial<Record<TranslationKey, string>>
 
-/** Registered catalogs. Only `en` ships; more locales are added via registerLocale(). */
+/** Registered catalogs. `en` is the default; the ported non-English catalogs are
+ * registered below via registerLocale(). */
 const catalogs: Record<string, Catalog> = { [DEFAULT_LOCALE]: en }
 
 /**
@@ -47,6 +63,23 @@ const catalogs: Record<string, Catalog> = { [DEFAULT_LOCALE]: en }
 export function registerLocale(code: string, catalog: Catalog): void {
   catalogs[code] = catalog
 }
+
+// Ported non-English catalogs (from the deleted legacy static/i18n.js). Keys a
+// locale lacks fall back to `en` via the fallback chain (legacy behavior).
+registerLocale('cs', cs)
+registerLocale('es', es)
+registerLocale('de', de)
+registerLocale('fr', fr)
+registerLocale('it', it)
+registerLocale('ja', ja)
+registerLocale('ko', ko)
+registerLocale('pl', pl)
+registerLocale('pt', pt)
+registerLocale('ru', ru)
+registerLocale('tr', tr)
+registerLocale('vi', vi)
+registerLocale('zh', zh)
+registerLocale('zh-Hant', zhHant)
 
 /** Look up a key in a catalog; unknown keys yield undefined (→ fallback chain). */
 function lookup(catalog: Catalog | undefined, key: string): string | undefined {
